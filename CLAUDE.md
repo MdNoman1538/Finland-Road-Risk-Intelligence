@@ -53,10 +53,18 @@ The owner is learning AI engineering through this project. **Explain the why, wh
 
 ## Commands
 
-Environment: conda env `ailearn` (Python 3.12). Being migrated to `uv` in Phase 0; this section will be updated.
+Environment: managed by `uv` (Python 3.12, `.venv/`). Dependencies: `pyproject.toml` → `uv.lock` → generated `requirements.txt` (for Render). Never edit `requirements.txt` by hand.
 
 ```bash
-uvicorn src.api.main:app --reload                      # API on :8000
-PYTHONPATH=. python -m streamlit run src/ui/app.py      # dashboard on :8501
-python src/spatial/ingest_all.py                         # rebuild DB (needs data/raw/)
+uv sync                                                  # install exact locked versions
+uv run ruff check . && uv run ruff format --check .      # lint + format check
+uv run pytest                                            # tests (must pass before any commit)
+uv run pre-commit run --all-files                        # all hooks
+uv run uvicorn src.api.main:app --reload                 # API on :8000
+PYTHONPATH=. uv run streamlit run src/ui/app.py          # dashboard on :8501
+uv run python src/spatial/ingest_all.py                  # rebuild DB (needs data/raw/)
 ```
+
+If a conda env is active, `uv` prints a `VIRTUAL_ENV ... does not match` warning; it's harmless (uv uses `.venv`). Run `conda deactivate` or `export VIRTUAL_ENV=` to silence it.
+
+DuckDB extensions are installed **per DuckDB version** (`~/.duckdb/extensions/vX.Y.Z/`). After a DuckDB upgrade, `LOAD spatial` fails until `INSTALL spatial` runs again.
