@@ -49,7 +49,10 @@ def get_municipality_hotspots(
     _db_path: str, municipality: str, winter_only: bool, road_user: str | None
 ) -> pd.DataFrame:
     con = duckdb.connect(_db_path, read_only=True)
-    con.execute("LOAD spatial;")
+    try:
+        con.execute("INSTALL spatial; LOAD spatial;")
+    except Exception:
+        pass  # Fallback if already loaded or running offline
     try:
         where_clauses = ["TRIM(r.municipality) = $1"]
         params: list = [municipality]
