@@ -1,7 +1,8 @@
 from pathlib import Path
 import duckdb
 
-DB_PATH = Path("/Users/noman/Documents/AI/RoadAccident/data/processed/road_risk.duckdb")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DB_PATH = PROJECT_ROOT / "data" / "processed" / "road_risk.duckdb"
 
 def test_radius_lookup(lat: float = 65.0121, lon: float = 25.4651, radius_m: float = 500.0):
     con = duckdb.connect(str(DB_PATH), read_only=True)

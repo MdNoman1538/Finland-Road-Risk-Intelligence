@@ -1,7 +1,7 @@
 from pathlib import Path
 import csv
 
-PROJECT_ROOT = Path("/Users/noman/Documents/AI/RoadAccident")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
 
 def check_csv_headers():

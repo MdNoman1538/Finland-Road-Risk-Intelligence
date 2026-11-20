@@ -3,7 +3,7 @@ import zipfile
 import os
 
 # Explicit absolute path to prevent any resolution mistakes
-PROJECT_ROOT = Path("/Users/noman/Documents/AI/RoadAccident")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
 
 def inspect_raw_data():

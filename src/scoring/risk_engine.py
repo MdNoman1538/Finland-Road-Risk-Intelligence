@@ -10,7 +10,8 @@ from src.i18n import (
     translate_surface,
 )
 
-DB_PATH = Path("/Users/noman/Documents/AI/RoadAccident/data/processed/road_risk.duckdb")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DB_PATH = PROJECT_ROOT / "data" / "processed" / "road_risk.duckdb"
 
 SEVERITY_WEIGHTS: dict[str, float] = {
     "Kuolemaan johtanut": 10.0,

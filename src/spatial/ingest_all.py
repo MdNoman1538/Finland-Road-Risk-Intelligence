@@ -2,7 +2,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-PROJECT_ROOT = Path("/Users/noman/Documents/AI/RoadAccident")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = PROJECT_ROOT / "data" / "processed" / "road_risk.duckdb"
 RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
 
