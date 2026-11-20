@@ -1,4 +1,3 @@
-import duckdb
 import folium
 import pandas as pd
 import streamlit as st
@@ -21,8 +20,8 @@ def get_engine() -> SpatialRiskEngine:
 
 
 @st.cache_data
-def get_regions_and_municipalities(_db_path: str) -> pd.DataFrame:
-    con = duckdb.connect(_db_path, read_only=True)
+def get_regions_and_municipalities() -> pd.DataFrame:
+    con = get_engine().cursor()
     try:
         return con.execute("""
             SELECT
@@ -46,16 +45,9 @@ def get_regions_and_municipalities(_db_path: str) -> pd.DataFrame:
 
 
 @st.cache_data
-def get_municipality_hotspots(
-    _db_path: str, municipality: str, winter_only: bool, road_user: str | None
-) -> pd.DataFrame:
-    con = duckdb.connect(_db_path, read_only=True)
-    # Silent `except: pass` hides failures; tracked as known issue #1-2 in docs/project-status.md,
-    # replaced by a shared connection helper in the spatial-extension fix PR.
-    try:  # noqa: SIM105
-        con.execute("INSTALL spatial; LOAD spatial;")
-    except Exception:
-        pass  # Fallback if already loaded or running offline
+def get_municipality_hotspots(municipality: str, winter_only: bool, road_user: str | None) -> pd.DataFrame:
+    # Shared engine connection: spatial extension guaranteed installed + loaded (src/db.py).
+    con = get_engine().cursor()
     try:
         where_clauses = ["TRIM(r.municipality) = $1"]
         params: list = [municipality]
@@ -110,7 +102,7 @@ def severity_color(severity_label: str) -> str:
 
 
 engine = get_engine()
-geo_df = get_regions_and_municipalities(str(engine.db_path))
+geo_df = get_regions_and_municipalities()
 
 with st.sidebar:
     lang_choice = st.radio("Language / Kieli", ["English", "Suomi"], horizontal=True)
@@ -173,7 +165,7 @@ with st.sidebar:
         step=50,
     )
 
-    hotspots_df = get_municipality_hotspots(str(engine.db_path), selected_muni, winter_only, user_filter)
+    hotspots_df = get_municipality_hotspots(selected_muni, winter_only, user_filter)
     if not hotspots_df.empty:
         hotspot_labels = [
             f"#{i + 1}: {row.crashes} crashes — {translate_accident_type(row.dominant_crash_type, lang)}"
