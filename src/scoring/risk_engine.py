@@ -71,11 +71,17 @@ class RiskProfile(BaseModel):
 
 
 class SpatialRiskEngine:
-    def __init__(self, db_path: Path = DB_PATH):
+    def __init__(self, db_path: Path = DB_PATH, extension_directory: Path | None = None):
         self.db_path = db_path
+        # Where DuckDB stores extensions. None = DuckDB default (~/.duckdb/extensions).
+        # Tests point this at an empty directory to simulate a fresh machine.
+        self.extension_directory = extension_directory
 
     def _connect(self) -> duckdb.DuckDBPyConnection:
-        con = duckdb.connect(str(self.db_path), read_only=True)
+        config = {}
+        if self.extension_directory is not None:
+            config["extension_directory"] = str(self.extension_directory)
+        con = duckdb.connect(str(self.db_path), read_only=True, config=config)
         con.execute("LOAD spatial;")
         return con
 
