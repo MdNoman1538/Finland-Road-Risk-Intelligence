@@ -1,5 +1,9 @@
+import datetime
+import heapq
 import math
 import threading
+from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -28,7 +32,12 @@ class RiskQuery(BaseModel):
     lat: float = Field(..., ge=-90.0, le=90.0, description="WGS84 Latitude")
     lon: float = Field(..., ge=-180.0, le=180.0, description="WGS84 Longitude")
     radius_m: float = Field(default=250.0, gt=0.0, le=10000.0, description="Search radius in meters")
-    reference_year: int = Field(default=2025, ge=2014, le=2030)
+    reference_year: int | None = Field(
+        default=None,
+        ge=2014,
+        le=2100,
+        description="Year that time decay counts back from. None = the latest year in the data.",
+    )
     half_life_years: float = Field(default=5.0, gt=0.0)
     winter_only: bool = Field(default=False, description="Filter to icy/snowy/slushy road surfaces")
     road_user_filter: str | None = Field(
@@ -58,6 +67,9 @@ class RiskProfile(BaseModel):
     lon: float
     radius_m: float
     lang: str
+    reference_year: int = Field(
+        ..., description="Year time decay counted back from; later crashes are excluded"
+    )
     total_accidents: int
     raw_severity_points: float
     decayed_risk_index: float
@@ -66,7 +78,9 @@ class RiskProfile(BaseModel):
     severity_breakdown: dict[str, int]
     top_surface_conditions: dict[str, int]
     top_accident_types: dict[str, int]
-    nearest_incidents: list[AccidentSummary]
+    highest_weighted_incidents: list[AccidentSummary] = Field(
+        ..., description="Up to 15 incidents with the highest weighted_score (severity × recency × proximity)"
+    )
 
 
 class SpatialRiskEngine:
@@ -85,6 +99,7 @@ class SpatialRiskEngine:
         self.extension_directory = extension_directory
         self._con: duckdb.DuckDBPyConnection | None = None
         self._con_lock = threading.Lock()
+        self._latest_year: int | None = None
 
     def _connection(self) -> duckdb.DuckDBPyConnection:
         # Lazy, so that creating the engine (e.g. at API import time) never touches the DB.
@@ -103,9 +118,26 @@ class SpatialRiskEngine:
             if self._con is not None:
                 self._con.close()
                 self._con = None
+            self._latest_year = None  # a reconnect may see refreshed data
+
+    def latest_data_year(self) -> int:
+        """The newest crash year in the database: the default "now" for time decay.
+
+        Read once per connection (the database is read-only while the app runs). A data
+        refresh is picked up after a restart or close(), never frozen in code (known issue
+        #4). With no years at all (empty table) it falls back to the calendar year.
+        """
+        if self._latest_year is None:
+            con = self.cursor()
+            try:
+                latest = con.execute("SELECT MAX(year) FROM road_accidents").fetchone()[0]
+            finally:
+                con.close()
+            self._latest_year = int(latest) if latest is not None else datetime.date.today().year
+        return self._latest_year
 
     @staticmethod
-    def _classify_tier(score: float) -> str:
+    def classify_tier(score: float) -> str:
         if score >= 75.0:
             return "CRITICAL"
         if score >= 50.0:
@@ -115,26 +147,33 @@ class SpatialRiskEngine:
         return "LOW"
 
     def evaluate_point(self, query: RiskQuery) -> RiskProfile:
+        reference_year = query.reference_year if query.reference_year is not None else self.latest_data_year()
+
+        # Every value goes in as a parameter, never spliced into the SQL text.
+        params: list = [query.lon, query.lat]
+
+        def param(value) -> str:
+            params.append(value)
+            return f"${len(params)}"
+
+        where_clauses = [f"ST_DWithin(r.geom_3067, t.pt, {param(query.radius_m)})"]
+        # Risk "as of" a year must not see later crashes (they would get full weight).
+        where_clauses.append(f"(r.year IS NULL OR r.year <= {param(reference_year)})")
+        if query.winter_only:
+            where_clauses.append(f"LOWER(r.surface_condition) = ANY({param(list(WINTER_SURFACES))})")
+
+        join_clause = ""
+        if query.road_user_filter:
+            join_clause = f"""
+                INNER JOIN (
+                    SELECT DISTINCT accident_id
+                    FROM accident_participants
+                    WHERE LOWER(vehicle_type) = LOWER({param(query.road_user_filter.strip())})
+                ) p ON r.accident_id = p.accident_id
+            """
+
         con = self.cursor()
         try:
-            where_clauses = ["ST_DWithin(r.geom_3067, t.pt, $3)"]
-            params: list = [query.lon, query.lat, query.radius_m]
-
-            if query.winter_only:
-                placeholders = ", ".join([f"'{s}'" for s in WINTER_SURFACES])
-                where_clauses.append(f"LOWER(r.surface_condition) IN ({placeholders})")
-
-            join_clause = ""
-            if query.road_user_filter:
-                join_clause = """
-                    INNER JOIN (
-                        SELECT DISTINCT accident_id
-                        FROM accident_participants
-                        WHERE LOWER(vehicle_type) = LOWER($4)
-                    ) p ON r.accident_id = p.accident_id
-                """
-                params.append(query.road_user_filter.strip())
-
             sql = f"""
                 WITH target AS (
                     SELECT ST_Transform(ST_Point($1, $2), 'EPSG:4326', 'EPSG:3067', always_xy := true) AS pt
@@ -166,17 +205,17 @@ class SpatialRiskEngine:
         raw_points = 0.0
         decayed_index = 0.0
 
-        severity_counts: dict[str, int] = {}
-        surface_counts: dict[str, int] = {}
-        type_counts: dict[str, int] = {}
-        scored_incidents: list[AccidentSummary] = []
+        # Count the canonical Finnish values; translate each distinct value once afterwards.
+        severity_raw: Counter[str] = Counter()
+        surface_raw: Counter[str] = Counter()
+        type_raw: Counter[str] = Counter()
+        scored: list[tuple[float, tuple]] = []
 
         for row in rows:
-            (acc_id, year, month, severity, surface, lighting, speed_limit, acc_type, dist_m, lat, lon) = row
+            (_, year, _, severity, surface, _, _, acc_type, dist_m, _, _) = row
 
-            # Always compute weight using canonical Finnish severity key
             w_sev = SEVERITY_WEIGHTS.get(severity, 1.0)
-            age_years = max(0, query.reference_year - (year or query.reference_year))
+            age_years = max(0, reference_year - (year or reference_year))
             w_time = math.exp(-decay_lambda * age_years)
             w_dist = max(0.05, 1.0 - (dist_m / query.radius_m))
 
@@ -184,38 +223,23 @@ class SpatialRiskEngine:
             raw_points += w_sev
             decayed_index += incident_score
 
-            # Translate output fields according to requested language
-            sev_label = translate_severity(severity, query.lang)
-            surf_label = translate_surface(surface, query.lang)
-            light_label = translate_lighting(lighting, query.lang)
-            type_label = translate_accident_type(acc_type, query.lang)
-
-            severity_counts[sev_label] = severity_counts.get(sev_label, 0) + 1
-            surface_counts[surf_label] = surface_counts.get(surf_label, 0) + 1
-            type_counts[type_label] = type_counts.get(type_label, 0) + 1
-
-            scored_incidents.append(
-                AccidentSummary(
-                    accident_id=acc_id,
-                    year=year,
-                    month=month,
-                    severity=sev_label,
-                    surface_condition=surf_label,
-                    lighting=light_label,
-                    speed_limit=speed_limit,
-                    accident_type=type_label,
-                    distance_m=dist_m,
-                    weighted_score=round(incident_score, 3),
-                    lat=lat,
-                    lon=lon,
-                )
-            )
+            severity_raw[severity] += 1
+            surface_raw[surface] += 1
+            type_raw[acc_type] += 1
+            scored.append((round(incident_score, 3), row))
 
         area_scale = (query.radius_m / 250.0) ** 2
         density_adjusted = decayed_index / max(0.25, area_scale)
         normalized_score = round(100.0 * (1.0 - math.exp(-density_adjusted / 25.0)), 1)
 
-        top_incidents = sorted(scored_incidents, key=lambda x: x.weighted_score, reverse=True)[:15]
+        # Only the returned incidents become objects (known issue #11: building all 4,659 at
+        # Helsinki 2 km and keeping 15 dominated the time). nlargest equals a stable sort's top 15.
+        top_rows = heapq.nlargest(15, scored, key=lambda s: s[0])
+        top_incidents = [self._summary(row, score, query.lang) for score, row in top_rows]
+
+        severity_counts = _translated_counts(severity_raw, translate_severity, query.lang)
+        surface_counts = _translated_counts(surface_raw, translate_surface, query.lang)
+        type_counts = _translated_counts(type_raw, translate_accident_type, query.lang)
         top_surfaces = dict(sorted(surface_counts.items(), key=lambda x: x[1], reverse=True)[:5])
         top_types = dict(sorted(type_counts.items(), key=lambda x: x[1], reverse=True)[:5])
 
@@ -224,13 +248,42 @@ class SpatialRiskEngine:
             lon=query.lon,
             radius_m=query.radius_m,
             lang=query.lang,
+            reference_year=reference_year,
             total_accidents=len(rows),
             raw_severity_points=round(raw_points, 2),
             decayed_risk_index=round(decayed_index, 2),
             normalized_risk_score=normalized_score,
-            risk_tier=self._classify_tier(normalized_score),
+            risk_tier=self.classify_tier(normalized_score),
             severity_breakdown=severity_counts,
             top_surface_conditions=top_surfaces,
             top_accident_types=top_types,
-            nearest_incidents=top_incidents,
+            highest_weighted_incidents=top_incidents,
         )
+
+    @staticmethod
+    def _summary(row: tuple, weighted_score: float, lang: str) -> AccidentSummary:
+        (acc_id, year, month, severity, surface, lighting, speed_limit, acc_type, dist_m, lat, lon) = row
+        return AccidentSummary(
+            accident_id=acc_id,
+            year=year,
+            month=month,
+            severity=translate_severity(severity, lang),
+            surface_condition=translate_surface(surface, lang),
+            lighting=translate_lighting(lighting, lang),
+            speed_limit=speed_limit,
+            accident_type=translate_accident_type(acc_type, lang),
+            distance_m=dist_m,
+            weighted_score=weighted_score,
+            lat=lat,
+            lon=lon,
+        )
+
+
+def _translated_counts(raw: Counter[str], translate: Callable[[str, str], str], lang: str) -> dict[str, int]:
+    """Translate count keys. Two raw values can share a label (e.g. different spellings of
+    "missing"), so counts are summed. Keys keep first-appearance order, as before."""
+    out: dict[str, int] = {}
+    for value, count in raw.items():
+        label = translate(value, lang)
+        out[label] = out.get(label, 0) + count
+    return out

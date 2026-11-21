@@ -55,3 +55,66 @@ def test_concurrent_calls_from_many_threads_give_identical_results(engine):
 def test_close_then_reuse_reconnects(engine):
     engine.close()
     assert engine.evaluate_point(OULU_250).total_accidents == 95
+
+
+def test_latest_data_year_comes_from_the_data(engine):
+    con = engine.cursor()
+    try:
+        expected = con.execute("SELECT MAX(year) FROM road_accidents").fetchone()[0]
+    finally:
+        con.close()
+    assert engine.latest_data_year() == expected
+
+
+def test_default_reference_year_matches_explicit_latest_year(engine):
+    implicit = engine.evaluate_point(OULU_250)
+    explicit = engine.evaluate_point(
+        OULU_250.model_copy(update={"reference_year": engine.latest_data_year()})
+    )
+    assert implicit == explicit
+    assert implicit.reference_year == engine.latest_data_year()  # the response says which year it used
+
+
+def test_past_reference_year_ignores_later_crashes(engine):
+    """Risk "as of 2018" must not count 2019-2025 crashes (they used to get full weight)."""
+    as_of_2018 = engine.evaluate_point(HELSINKI_2000.model_copy(update={"reference_year": 2018}))
+    assert as_of_2018.reference_year == 2018
+    assert 0 < as_of_2018.total_accidents < 4659
+    assert all(i.year <= 2018 for i in as_of_2018.highest_weighted_incidents)
+
+
+def test_winter_filter_still_matches(engine):
+    winter = engine.evaluate_point(HELSINKI_2000.model_copy(update={"winter_only": True}))
+    assert 0 < winter.total_accidents < 4659
+
+
+def test_latest_data_year_survives_a_table_without_years(tmp_path):
+    """MAX(year) is NULL for an empty table: fall back to the calendar year instead of a
+    TypeError (a 500) later in the decay maths."""
+    import datetime
+
+    import duckdb
+
+    db = tmp_path / "empty.duckdb"
+    with duckdb.connect(str(db)) as con:
+        con.execute("CREATE TABLE road_accidents (year INTEGER)")
+    eng = SpatialRiskEngine(db_path=db)
+    try:
+        assert eng.latest_data_year() == datetime.date.today().year
+    finally:
+        eng.close()
+
+
+def test_close_forgets_the_cached_year(engine):
+    engine.latest_data_year()
+    engine.close()
+    assert engine._latest_year is None
+
+
+def test_incidents_are_the_highest_weighted_and_labelled_as_such(engine):
+    """Known issue #5: the field was called nearest_incidents but held the top 15 by weight."""
+    profile = engine.evaluate_point(HELSINKI_2000)
+    scores = [i.weighted_score for i in profile.highest_weighted_incidents]
+    assert len(scores) == 15
+    assert scores == sorted(scores, reverse=True)
+    assert not hasattr(profile, "nearest_incidents")

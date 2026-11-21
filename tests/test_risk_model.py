@@ -20,7 +20,7 @@ from src.scoring import RiskQuery, SpatialRiskEngine
     ],
 )
 def test_tier_boundaries(score, tier):
-    assert SpatialRiskEngine._classify_tier(score) == tier
+    assert SpatialRiskEngine.classify_tier(score) == tier
 
 
 def test_query_defaults():
@@ -43,3 +43,9 @@ def test_query_defaults():
 def test_query_rejects_invalid_input(bad):
     with pytest.raises(ValidationError):
         RiskQuery(**bad)
+
+
+def test_reference_year_defaults_to_none_meaning_latest_year_in_data():
+    """Known issue #4: the default was hard-coded to 2025, so time decay would silently
+    stop ageing old crashes when 2026 data arrives."""
+    assert RiskQuery(lat=65.0, lon=25.0).reference_year is None

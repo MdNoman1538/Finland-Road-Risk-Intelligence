@@ -1,5 +1,6 @@
 import logging
 import uuid
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -12,7 +13,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Finnish Road Risk Intelligence API",
     description="Spatial risk scoring backed by 2014–2025 Väylävirasto crash telemetry in DuckDB.",
-    version="1.0.0",
+    # 2.0.0: RiskProfile.nearest_incidents was renamed highest_weighted_incidents (breaking).
+    version="2.0.0",
 )
 
 engine = SpatialRiskEngine()
@@ -35,6 +37,7 @@ class RouteCorridorRequest(BaseModel):
     radius_m: float = 150.0
     winter_only: bool = False
     road_user_filter: str | None = None
+    lang: Literal["en", "fi"] = "en"
 
 
 class RouteCorridorResponse(BaseModel):
@@ -76,6 +79,7 @@ def evaluate_point_risk_get(
     radius_m: float = Query(250.0, gt=0.0, le=10000.0),
     winter_only: bool = Query(False),
     road_user_filter: str | None = Query(None),
+    lang: Literal["en", "fi"] = Query("en"),
 ):
     query = RiskQuery(
         lat=lat,
@@ -83,6 +87,7 @@ def evaluate_point_risk_get(
         radius_m=radius_m,
         winter_only=winter_only,
         road_user_filter=road_user_filter,
+        lang=lang,
     )
     return engine.evaluate_point(query)
 
@@ -100,6 +105,7 @@ def evaluate_route_corridor(req: RouteCorridorRequest):
                 radius_m=req.radius_m,
                 winter_only=req.winter_only,
                 road_user_filter=req.road_user_filter,
+                lang=req.lang,
             )
         )
         for lat, lon in req.waypoints
@@ -113,6 +119,6 @@ def evaluate_route_corridor(req: RouteCorridorRequest):
         waypoint_count=len(profiles),
         max_risk_score=max_score,
         mean_risk_score=mean_score,
-        overall_tier=engine._classify_tier(max_score),
+        overall_tier=engine.classify_tier(max_score),
         segments=profiles,
     )

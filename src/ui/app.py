@@ -246,7 +246,7 @@ with left_col:
         fill_opacity=0.12,
     ).add_to(m)
 
-    for inc in profile.nearest_incidents:
+    for inc in profile.highest_weighted_incidents:
         popup_html = (
             f"<b>Year:</b> {inc.year} (Month {inc.month})<br>"
             f"<b>Severity:</b> {inc.severity}<br>"
@@ -309,11 +309,11 @@ with right_col:
             use_container_width=True,
         )
 
-if profile.nearest_incidents:
+if profile.highest_weighted_incidents:
     st.subheader(
         "Highest-Weighted Historical Incidents" if lang == "en" else "Riskipainotetuimmat onnettomuudet"
     )
-    df_table = pd.DataFrame([inc.model_dump() for inc in profile.nearest_incidents])
+    df_table = pd.DataFrame([inc.model_dump() for inc in profile.highest_weighted_incidents])
     st.dataframe(
         df_table[
             [
