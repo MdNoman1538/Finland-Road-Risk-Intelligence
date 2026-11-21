@@ -1,6 +1,6 @@
 # Project Status
 
-**As of:** 2026-11-21 · **Current phase:** [Phase 0](roadmap.md#phase-0--engineering-foundations), in progress. Workflow and docs PR prepared; tooling/CI next.
+**As of:** 2026-11-21 · **Current phase:** [Phase 0](roadmap.md#phase-0--engineering-foundations), in progress. Workflow/docs PR and tooling/CI PR prepared locally (not yet pushed). Spatial-extension fix is next.
 
 ## Summary
 
@@ -63,13 +63,13 @@ Measured 2026-11-21 on an Apple M3 with 16 GB, DuckDB 2.0.0, on a scratch copy o
 
 | # | Issue | Evidence | Severity | Fix in |
 |---|---|---|---|---|
-| 1 | **The API fails on a fresh server.** The engine only runs `LOAD spatial`. The last commit (7a0dd11) added `INSTALL` only to the dashboard's hotspot function. | Bare `LOAD spatial` against an empty extension directory → `IO Error: Extension ... not found`. `/health` still passes because it never touches the DB, so Render shows the service as healthy while `/api/v1/risk/*` errors. | High (deployed demo is broken) | Phase 0, first task |
+| 1 | **The API fails on a fresh server.** The engine only runs `LOAD spatial`. The last commit (7a0dd11) added `INSTALL` only to the dashboard's hotspot function. | Bare `LOAD spatial` against an empty extension directory → `IO Error: Extension ... not found`. `/health` still passes because it never touches the DB, so Render shows the service as healthy while `/api/v1/risk/*` errors. Also reproduced locally after a DuckDB 2.0.0 → 2.0.1 upgrade, because extensions are stored per version. | High (deployed demo is broken) | Phase 0, first task |
 | 2 | The dashboard works on Render only by luck of ordering. The hotspot function happens to install the extension before the engine runs. | Code order in `app.py`. | Medium | Phase 0 |
 | 3 | A new DB connection is opened on every request. | Benchmark above. | Medium | Phase 0 |
 | 4 | `reference_year` is hard-coded to 2025. | `RiskQuery` default. | Low | Phase 0 |
 | 5 | `nearest_incidents` actually returns the 15 highest-*weighted* incidents, not the nearest. | `risk_engine.py`. | Low (naming) | Phase 0 |
 | 6 | The GET point endpoint has no `lang` parameter. The route endpoint calls the private `_classify_tier`. | `api/main.py`. | Low | Phase 0 |
-| 7 | No tests, no CI, no lint. All commits so far went straight to `main` with no review. | Repo, git history. | High (for an industry goal) | Phase 0 ([ADR-0004](decisions/0004-development-workflow.md)) |
+| 7 | ~~No tests, no CI, no lint.~~ Addressed by the tooling/CI PR: uv, ruff, pytest (36 unit tests), pre-commit, GitHub Actions. Still missing: integration tests that use the DB. | Repo, git history. | High (for an industry goal) | Phase 0 ([ADR-0004](decisions/0004-development-workflow.md)) |
 | 8 | The 38 MB `.duckdb` file is committed to git. | `git ls-files`. | Medium | Phase 0 |
 | 9 | The code license is CC BY-NC (non-commercial), which blocks industry use. | `LICENSE`. | Decision needed before approaching industry | Phase 10 |
 

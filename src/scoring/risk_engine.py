@@ -1,8 +1,10 @@
-from pathlib import Path
 import math
-from typing import Literal, Optional
+from pathlib import Path
+from typing import Literal
+
 import duckdb
 from pydantic import BaseModel, Field
+
 from src.i18n import (
     translate_accident_type,
     translate_lighting,
@@ -30,7 +32,7 @@ class RiskQuery(BaseModel):
     reference_year: int = Field(default=2025, ge=2014, le=2030)
     half_life_years: float = Field(default=5.0, gt=0.0)
     winter_only: bool = Field(default=False, description="Filter to icy/snowy/slushy road surfaces")
-    road_user_filter: Optional[str] = Field(
+    road_user_filter: str | None = Field(
         default=None,
         description="Optional participant filter, e.g. 'polkupyöräilijä', 'jalankulkija', 'hirvi', 'kuorma-auto'",
     )
@@ -40,11 +42,11 @@ class RiskQuery(BaseModel):
 class AccidentSummary(BaseModel):
     accident_id: str
     year: int
-    month: Optional[int]
+    month: int | None
     severity: str
     surface_condition: str
     lighting: str
-    speed_limit: Optional[int]
+    speed_limit: int | None
     accident_type: str
     distance_m: float
     weighted_score: float
@@ -101,8 +103,8 @@ class SpatialRiskEngine:
             if query.road_user_filter:
                 join_clause = """
                     INNER JOIN (
-                        SELECT DISTINCT accident_id 
-                        FROM accident_participants 
+                        SELECT DISTINCT accident_id
+                        FROM accident_participants
                         WHERE LOWER(vehicle_type) = LOWER($4)
                     ) p ON r.accident_id = p.accident_id
                 """
@@ -112,7 +114,7 @@ class SpatialRiskEngine:
                 WITH target AS (
                     SELECT ST_Transform(ST_Point($1, $2), 'EPSG:4326', 'EPSG:3067', always_xy := true) AS pt
                 )
-                SELECT 
+                SELECT
                     r.accident_id,
                     r.year,
                     r.month,
@@ -127,7 +129,7 @@ class SpatialRiskEngine:
                 FROM road_accidents r
                 CROSS JOIN target t
                 {join_clause}
-                WHERE {' AND '.join(where_clauses)}
+                WHERE {" AND ".join(where_clauses)}
                 ORDER BY distance_m ASC;
             """
 
@@ -145,10 +147,7 @@ class SpatialRiskEngine:
         scored_incidents: list[AccidentSummary] = []
 
         for row in rows:
-            (
-                acc_id, year, month, severity, surface,
-                lighting, speed_limit, acc_type, dist_m, lat, lon
-            ) = row
+            (acc_id, year, month, severity, surface, lighting, speed_limit, acc_type, dist_m, lat, lon) = row
 
             # Always compute weight using canonical Finnish severity key
             w_sev = SEVERITY_WEIGHTS.get(severity, 1.0)
