@@ -103,3 +103,54 @@ The owner chose option A, a GitHub Release asset. What was built:
 **Why not rewrite history to remove the old 38 MB?** It would need a force-push to a public repository. Every existing clone would then diverge, and every fork would keep the file anyway. That's destructive, for a small gain.
 
 **Order matters when shipping this:** the Release must exist *before* the PR's CI runs, or the fetch step fails with 404.
+
+## Data hygiene: cleaning as code, not by hand
+
+The owner's rule: *don't clean the data yourself; write code and run it, so the system is reproducible.* So nothing in the database was edited. The rules live in `src/ingestion/clean.py`, and the database was rebuilt from the raw CSVs by running the pipeline.
+
+### Investigate first (read-only)
+
+| Finding | Evidence |
+|---|---|
+| "Missing" spelled 8 ways across 6 columns | `Ei arvoa` 16,229 / `-` 3,118 / `Unknown` 916 in surface alone; `Ei tiedossa` 102 in region |
+| `heavy_vehicle`: `on`/`ei` (2014–21), `true`/`false` (2022), `kyllä`/`ei` (2023+), plus `ei arvoa` | Cross-checked: 99.8–100 % of "yes" crashes have a lorry or bus participant, 0 % of "no" crashes do. So the mapping is measured, not assumed |
+| `speed_limit = -1` (5,117, 2014–21 only) vs NULL (433, 2022+) | Same meaning, two encodings |
+| `accident_type`: 116 spellings, really 77 + missing | Trailing and double spaces; no letter-case variants |
+| **The "duplicate ID" was two different crashes** | 9710903: fatal 2019 Joensuu, and property-damage 2020 Pieksämäki. Participant 17333514 also exists in both years (a cyclist in 2019, a car in 2020) |
+| 173 crashes have no coordinates and were dropped silently; their participants became 290 orphans | Raw vs loaded reconciliation: 180,907 − 173 = 180,734 exactly |
+| `ignore_errors=true` wasn't hiding anything | All 12 files parse with `ignore_errors=false` |
+
+**The big lesson is the "duplicate".** A naive `DISTINCT` or "keep first" would have **deleted a fatal crash**. The source system reuses IDs across years, so the real key is `(year, accident_id)`. Worse, the cyclist filter joined participants on `accident_id` alone, so the 2020 crash would count as a cyclist crash because of a 2019 cyclist. Both the engine and the dashboard now join on `(year, accident_id)`.
+
+### Design choices
+
+- **Missing → NULL, labelled at the output.** A string such as `'Unknown'` looks like a category to SQL, to `GROUP BY` and to ML models. NULL is the standard "no value", and pandera (Phase 1) checks it natively. Translators show "Not recorded" / "Ei tiedossa".
+- **Each rule is written once, as SQL.** Participants used to be cleaned in pandas and accidents in SQL; two copies of a rule drift apart. Now pandas only *reads* (it handles the UTF-16 2025 file) and everything goes through the same SQL functions.
+- **An unknown spelling stops the build.** `heavy_vehicle` uses DuckDB's `error()` for values it hasn't seen. When Väylävirasto changes its format again (it already has, twice), we find out at ingestion instead of silently mapping it to NULL.
+- **Quarantine, not deletion.** Unusable rows go to `ingest_rejects` with a reason (`no_coordinates`, `crash_not_loaded`), so losses are counted and auditable.
+- **Lineage.** `ingest_files` stores each raw file's SHA-256 and its read/loaded/rejected counts. Anyone with the same raw files can prove they have the same inputs.
+- **Atomic build.** The pipeline writes `road_risk.duckdb.building` and renames it into place only on success. A failed build leaves the old database untouched; a test covers this.
+- **A strict parser.** `ignore_errors=false`, so a malformed row stops the build instead of vanishing.
+
+### Proof
+
+- **Reproducible:** two builds from the real raw data gave identical content fingerprints for all three tables (`road_accidents 4bb7f692…`, `accident_participants c90229e1…`, `ingest_rejects c378843c…`). The `.duckdb` file isn't byte-stable between builds, so the fingerprint hashes the *contents* in a fixed order.
+- **Nothing lost:** all 180,734 crashes are identical by year, ID and coordinates. Every NULL count equals the sum of the old spellings, for example region 4,014 = 3,912 + 102.
+- **Scores unchanged:** for the 5 snapshot queries, every total, score and tier is identical. Only the breakdowns changed, and they're now correct:
+  - Helsinki "Not recorded" went from 602 to 623: missing data was under-counted.
+  - In the Helsinki winter query, "rear-end into braking vehicle" was split 7 + 4 by a trailing space. As one category of 11 it's the top crash type, which the old list hid.
+- **Tests:** 111 pass. The synthetic-CSV tests cover every rule in both file formats, the rejects, the logging, a reproducible double build, the failed-build case, and the cross-year filter bug.
+
+The new database is pinned as `data-2026-11-22` and has to be uploaded as a release before CI on this PR can fetch it.
+
+### What the code review caught (data hygiene)
+
+`/code-review medium` reported 9 findings. One was the not-yet-uploaded release, which is an owner step. The other 8 were fixed, test-first where they were behaviour:
+
+- **The documented rebuild command crashed** (`ModuleNotFoundError: src`): it ran the file as a script, so `src` wasn't importable. It's now `python -m src.ingestion.ingest_all`. My own runs had used `PYTHONPATH=.`, which hid the problem: a reminder to test the *documented* command, not your own variant.
+- **Accident IDs were parsed by DuckDB's type detection, participant IDs as text by pandas.** A leading zero would stop them joining. Every accident column is now read as text (`all_varchar`). Today's data happened to be unaffected, but by luck.
+- **`TRY_CAST` turned a garbled coordinate into "no coordinates",** and a bad month into NULL. That broke the "nothing silently" promise. Now `bad_coordinates` is its own reject reason, and an impossible month stops the build.
+- **A stale `road_risk.duckdb.wal`** from a crashed writer could be replayed onto the new file. It's removed before the swap.
+- **Smaller fixes:** a truncated download now says "incomplete" instead of "checksum mismatch"; road-user filters normalise inner whitespace; visible `﻿` escapes replace invisible BOM characters; and ADR-0008 records the key and missing-value decision.
+
+**Verification:** rebuilt from the real raw files with the documented command; the content fingerprints are identical to the first clean build. So the fixes changed nothing in today's data and only guard against future files. 117 tests pass.

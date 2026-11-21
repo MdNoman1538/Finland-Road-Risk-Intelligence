@@ -2,6 +2,9 @@ from typing import Literal
 
 Lang = Literal["en", "fi"]
 
+# Missing values are NULL in the database (src/ingestion/clean.py); this is how they read.
+MISSING_LABEL: dict[str, str] = {"en": "Not recorded", "fi": "Ei tiedossa"}
+
 SEVERITY_MAP: dict[str, str] = {
     "Ei henkilövahinkoja": "Property Damage Only (No Injuries)",
     "Loukkaantumiseen johtanut": "Injury Crash",
@@ -170,32 +173,42 @@ ACCIDENT_TYPE_EXACT: dict[str, str] = {
 }
 
 
-def translate_severity(val: str, lang: Lang = "en") -> str:
-    if lang == "fi" or not val:
+def translate_severity(val: str | None, lang: Lang = "en") -> str:
+    if not val:
+        return MISSING_LABEL[lang]
+    if lang == "fi":
         return val
     return SEVERITY_MAP.get(val.strip(), val)
 
 
-def translate_surface(val: str, lang: Lang = "en") -> str:
-    if lang == "fi" or not val:
+def translate_surface(val: str | None, lang: Lang = "en") -> str:
+    if not val:
+        return MISSING_LABEL[lang]
+    if lang == "fi":
         return val
     return SURFACE_MAP.get(val.strip().lower(), val)
 
 
-def translate_lighting(val: str, lang: Lang = "en") -> str:
-    if lang == "fi" or not val:
+def translate_lighting(val: str | None, lang: Lang = "en") -> str:
+    if not val:
+        return MISSING_LABEL[lang]
+    if lang == "fi":
         return val
     return LIGHTING_MAP.get(val.strip().lower(), val)
 
 
-def translate_vehicle(val: str, lang: Lang = "en") -> str:
-    if lang == "fi" or not val:
+def translate_vehicle(val: str | None, lang: Lang = "en") -> str:
+    if not val:
+        return MISSING_LABEL[lang]
+    if lang == "fi":
         return val
     return VEHICLE_MAP.get(val.strip().lower(), val.capitalize())
 
 
-def translate_accident_type(val: str, lang: Lang = "en") -> str:
-    if lang == "fi" or not val:
+def translate_accident_type(val: str | None, lang: Lang = "en") -> str:
+    if not val:
+        return MISSING_LABEL[lang]
+    if lang == "fi":
         return val
     cleaned = " ".join(val.strip().split())
     normalized = cleaned.rstrip(".").lower()

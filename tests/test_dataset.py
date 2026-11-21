@@ -82,3 +82,12 @@ def test_database_file_is_not_tracked_by_git():
         ["git", "ls-files", "data/processed"], cwd=PROJECT_ROOT, capture_output=True, text=True, check=True
     ).stdout
     assert tracked == ""
+
+
+def test_fetch_reports_a_truncated_download_as_such(source, tmp_path):
+    lock_path = _lock_for(source, tmp_path)
+    lock = json.loads(lock_path.read_text())
+    lock["bytes"] += 10  # the server sent fewer bytes than the release holds
+    lock_path.write_text(json.dumps(lock))
+    with pytest.raises(dataset.ChecksumError, match="incomplete"):
+        dataset.fetch(lock_path, tmp_path / "road_risk.duckdb")
