@@ -43,7 +43,8 @@ Module rules (one job per module, one-way dependencies, no empty placeholders): 
 |---|---|
 | `src/core/dataset.py` | Fetches the crash DB release asset pinned by `data/road_risk.lock.json` ([ADR-0007](docs/decisions/0007-database-as-versioned-release-asset.md)) |
 | `src/core/db.py` | The only place DuckDB connections are opened (installs + loads the spatial extension) |
-| `src/ingestion/ingest_all.py` | Raw Väylävirasto CSVs → `data/processed/road_risk.duckdb` (two schema eras: 2014–21 and 2022+) |
+| `src/ingestion/ingest_all.py` | Raw Väylävirasto CSVs → `data/processed/road_risk.duckdb` (two schema eras: 2014–21 and 2022+); reproducible, atomic |
+| `src/ingestion/clean.py` | The cleaning rules, each written once as SQL |
 | `scripts/exploration/` | One-off data inspection scripts (not part of the app) |
 | `src/scoring/risk_engine.py` | `SpatialRiskEngine`: radius-based risk scoring (to be replaced in Phases 1–2) |
 | `src/api/main.py` | FastAPI service |
@@ -54,7 +55,9 @@ Module rules (one job per module, one-way dependencies, no empty placeholders): 
 
 - Coordinates are stored in EPSG:3067 (ETRS-TM35FIN, metres) as `geom_3067`, plus WGS84 `lat`/`lon`. Do distance math in 3067.
 - Category values are Finnish (for example `Kuolemaan johtanut`, `päivänvalo`). Translate only at the output layer.
-- "Missing" currently appears as `Ei arvoa`, `-` or `Unknown` (cleanup planned in Phase 0).
+- **Missing is NULL** in the database (never a string); translators label it "Not recorded" / "Ei tiedossa". Cleaning rules: `src/ingestion/clean.py`. Never clean the DB by hand: change the rules and rebuild.
+- **The key is `(year, accident_id)`**: the source reuses IDs across years for different crashes. Always join participants on both.
+- `ingest_rejects` holds rows that couldn't be used (and why); `ingest_files` records the raw files' SHA-256 and row counts.
 - Yearly counts are not comparable over time: recording rules changed. "Severe injury" exists only from 2022.
 
 ## Commands

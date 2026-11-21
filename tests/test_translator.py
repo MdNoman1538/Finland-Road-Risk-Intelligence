@@ -36,8 +36,11 @@ def test_finnish_output_returns_canonical_value_unchanged(fn):
     "fn",
     [translate_severity, translate_surface, translate_lighting, translate_vehicle, translate_accident_type],
 )
-def test_empty_value_is_passed_through(fn):
-    assert fn("", "en") == ""
+@pytest.mark.parametrize(("lang", "label"), [("en", "Not recorded"), ("fi", "Ei tiedossa")])
+def test_missing_value_gets_one_label_per_language(fn, lang, label):
+    """Missing is NULL in the database; every output reads the same, in either language."""
+    assert fn(None, lang) == label
+    assert fn("", lang) == label
 
 
 def test_surface_and_lighting_are_case_and_whitespace_insensitive():

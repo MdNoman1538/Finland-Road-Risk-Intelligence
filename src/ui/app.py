@@ -25,19 +25,17 @@ def get_regions_and_municipalities() -> pd.DataFrame:
     try:
         return con.execute("""
             SELECT
-                TRIM(region) AS region,
-                TRIM(municipality) AS municipality,
+                region,
+                municipality,
                 COUNT(*) AS total_crashes,
                 MEDIAN(lat) AS center_lat,
                 MEDIAN(lon) AS center_lon
             FROM road_accidents
-            WHERE municipality IS NOT NULL
-              AND TRIM(municipality) NOT IN ('', 'Unknown', 'Ei arvoa', '-')
+            WHERE municipality IS NOT NULL  -- missing is NULL in the DB (src/ingestion/clean.py)
               AND region IS NOT NULL
-              AND TRIM(region) NOT IN ('', 'Unknown', 'Ei arvoa', '-')
               AND lat IS NOT NULL
               AND lon IS NOT NULL
-            GROUP BY TRIM(region), TRIM(municipality)
+            GROUP BY region, municipality
             ORDER BY total_crashes DESC;
         """).fetchdf()
     finally:
@@ -49,7 +47,7 @@ def get_municipality_hotspots(municipality: str, winter_only: bool, road_user: s
     # Shared engine connection: spatial extension guaranteed installed + loaded (src/db.py).
     con = get_engine().cursor()
     try:
-        where_clauses = ["TRIM(r.municipality) = $1"]
+        where_clauses = ["r.municipality = $1"]  # trimmed at ingestion
         params: list = [municipality]
 
         if winter_only:
@@ -61,10 +59,10 @@ def get_municipality_hotspots(municipality: str, winter_only: bool, road_user: s
         if road_user:
             join_clause = """
                 INNER JOIN (
-                    SELECT DISTINCT accident_id
+                    SELECT DISTINCT year, accident_id
                     FROM accident_participants
-                    WHERE LOWER(vehicle_type) = LOWER($2)
-                ) p ON r.accident_id = p.accident_id
+                    WHERE vehicle_type = LOWER($2)
+                ) p ON r.year = p.year AND r.accident_id = p.accident_id  -- IDs repeat across years
             """
             params.append(road_user)
 
@@ -251,7 +249,7 @@ with left_col:
             f"<b>Year:</b> {inc.year} (Month {inc.month})<br>"
             f"<b>Severity:</b> {inc.severity}<br>"
             f"<b>Type:</b> {inc.accident_type}<br>"
-            f"<b>Surface:</b> {inc.surface_condition} | <b>Speed:</b> {inc.speed_limit} km/h<br>"
+            f"<b>Surface:</b> {inc.surface_condition} | <b>Speed:</b> {inc.speed_limit or '–'} km/h<br>"
             f"<b>Score:</b> {inc.weighted_score}"
         )
         folium.CircleMarker(

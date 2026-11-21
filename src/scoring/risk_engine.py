@@ -166,10 +166,10 @@ class SpatialRiskEngine:
         if query.road_user_filter:
             join_clause = f"""
                 INNER JOIN (
-                    SELECT DISTINCT accident_id
+                    SELECT DISTINCT year, accident_id
                     FROM accident_participants
-                    WHERE LOWER(vehicle_type) = LOWER({param(query.road_user_filter.strip())})
-                ) p ON r.accident_id = p.accident_id
+                    WHERE vehicle_type = LOWER({param(query.road_user_filter.strip())})
+                ) p ON r.year = p.year AND r.accident_id = p.accident_id  -- IDs repeat across years
             """
 
         con = self.cursor()
