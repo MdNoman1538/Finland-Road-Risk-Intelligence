@@ -1,8 +1,13 @@
-from fastapi import FastAPI, HTTPException, Query
+import logging
+import uuid
+
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src.scoring import RiskProfile, RiskQuery, SpatialRiskEngine
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Finnish Road Risk Intelligence API",
@@ -11,6 +16,18 @@ app = FastAPI(
 )
 
 engine = SpatialRiskEngine()
+
+
+@app.exception_handler(Exception)
+async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
+    """Any unexpected error: full details to the server log, only an id to the client.
+
+    Exception text can contain file paths, SQL and data values (known issue #10), so it
+    never goes into the response. The id lets a user's report be matched to the log line.
+    """
+    error_id = uuid.uuid4().hex[:12]
+    logger.error("Unhandled error %s on %s %s", error_id, request.method, request.url.path, exc_info=exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error", "error_id": error_id})
 
 
 class RouteCorridorRequest(BaseModel):
@@ -49,10 +66,7 @@ def health_check():
 
 @app.post("/api/v1/risk/point", response_model=RiskProfile)
 def evaluate_point_risk(query: RiskQuery):
-    try:
-        return engine.evaluate_point(query)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return engine.evaluate_point(query)
 
 
 @app.get("/api/v1/risk/point", response_model=RiskProfile)
