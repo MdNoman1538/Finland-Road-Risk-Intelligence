@@ -88,3 +88,14 @@ def test_get_point_risk_supports_finnish_labels():
 def test_get_point_risk_rejects_unknown_language():
     response = client.get("/api/v1/risk/point", params={"lat": 65.0, "lon": 25.0, "lang": "sv"})
     assert response.status_code == 422
+
+
+@pytest.mark.integration
+def test_route_risk_supports_finnish_labels():
+    response = client.post("/api/v1/risk/route", json={"waypoints": [[65.0121, 25.4651]], "lang": "fi"})
+    assert response.status_code == 200
+    assert response.json()["segments"][0]["lang"] == "fi"
+
+
+def test_api_version_marks_the_breaking_field_rename():
+    assert api.app.version.startswith("2.")

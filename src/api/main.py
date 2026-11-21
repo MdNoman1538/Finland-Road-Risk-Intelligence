@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Finnish Road Risk Intelligence API",
     description="Spatial risk scoring backed by 2014–2025 Väylävirasto crash telemetry in DuckDB.",
-    version="1.0.0",
+    # 2.0.0: RiskProfile.nearest_incidents was renamed highest_weighted_incidents (breaking).
+    version="2.0.0",
 )
 
 engine = SpatialRiskEngine()
@@ -36,6 +37,7 @@ class RouteCorridorRequest(BaseModel):
     radius_m: float = 150.0
     winter_only: bool = False
     road_user_filter: str | None = None
+    lang: Literal["en", "fi"] = "en"
 
 
 class RouteCorridorResponse(BaseModel):
@@ -103,6 +105,7 @@ def evaluate_route_corridor(req: RouteCorridorRequest):
                 radius_m=req.radius_m,
                 winter_only=req.winter_only,
                 road_user_filter=req.road_user_filter,
+                lang=req.lang,
             )
         )
         for lat, lon in req.waypoints

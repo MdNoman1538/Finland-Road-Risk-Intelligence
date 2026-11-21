@@ -1,6 +1,6 @@
 # Project Status
 
-**As of:** 2026-11-22 · Module structure: see [architecture.md](architecture.md). · **Current phase:** [Phase 0](roadmap.md#phase-0--engineering-foundations), in progress. PRs #1–#4 (workflow/docs, tooling/CI, spatial-extension fix, module refactor) are merged; `main` is protected and requires the checks *Lint & dependency checks* and *Tests*. 59 tests passing.
+**As of:** 2026-11-22 · Module structure: see [architecture.md](architecture.md). · **Current phase:** [Phase 0](roadmap.md#phase-0--engineering-foundations), in progress. PRs #1–#4 (workflow/docs, tooling/CI, spatial-extension fix, module refactor) are merged; `main` is protected and requires the checks *Lint & dependency checks* and *Tests*. 65 tests passing. API version 2.0.0 (renamed field, see issue #5).
 
 ## Summary
 

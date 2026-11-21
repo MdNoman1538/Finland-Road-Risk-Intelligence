@@ -1,3 +1,4 @@
+import datetime
 import heapq
 import math
 import threading
@@ -66,6 +67,9 @@ class RiskProfile(BaseModel):
     lon: float
     radius_m: float
     lang: str
+    reference_year: int = Field(
+        ..., description="Year time decay counted back from; later crashes are excluded"
+    )
     total_accidents: int
     raw_severity_points: float
     decayed_risk_index: float
@@ -114,19 +118,22 @@ class SpatialRiskEngine:
             if self._con is not None:
                 self._con.close()
                 self._con = None
+            self._latest_year = None  # a reconnect may see refreshed data
 
     def latest_data_year(self) -> int:
         """The newest crash year in the database: the default "now" for time decay.
 
-        Read once per engine (the database is read-only while the app runs), so a data
-        refresh that adds a year moves the reference automatically (known issue #4).
+        Read once per connection (the database is read-only while the app runs). A data
+        refresh is picked up after a restart or close(), never frozen in code (known issue
+        #4). With no years at all (empty table) it falls back to the calendar year.
         """
         if self._latest_year is None:
             con = self.cursor()
             try:
-                self._latest_year = con.execute("SELECT MAX(year) FROM road_accidents").fetchone()[0]
+                latest = con.execute("SELECT MAX(year) FROM road_accidents").fetchone()[0]
             finally:
                 con.close()
+            self._latest_year = int(latest) if latest is not None else datetime.date.today().year
         return self._latest_year
 
     @staticmethod
@@ -140,26 +147,33 @@ class SpatialRiskEngine:
         return "LOW"
 
     def evaluate_point(self, query: RiskQuery) -> RiskProfile:
+        reference_year = query.reference_year if query.reference_year is not None else self.latest_data_year()
+
+        # Every value goes in as a parameter, never spliced into the SQL text.
+        params: list = [query.lon, query.lat]
+
+        def param(value) -> str:
+            params.append(value)
+            return f"${len(params)}"
+
+        where_clauses = [f"ST_DWithin(r.geom_3067, t.pt, {param(query.radius_m)})"]
+        # Risk "as of" a year must not see later crashes (they would get full weight).
+        where_clauses.append(f"(r.year IS NULL OR r.year <= {param(reference_year)})")
+        if query.winter_only:
+            where_clauses.append(f"LOWER(r.surface_condition) = ANY({param(list(WINTER_SURFACES))})")
+
+        join_clause = ""
+        if query.road_user_filter:
+            join_clause = f"""
+                INNER JOIN (
+                    SELECT DISTINCT accident_id
+                    FROM accident_participants
+                    WHERE LOWER(vehicle_type) = LOWER({param(query.road_user_filter.strip())})
+                ) p ON r.accident_id = p.accident_id
+            """
+
         con = self.cursor()
         try:
-            where_clauses = ["ST_DWithin(r.geom_3067, t.pt, $3)"]
-            params: list = [query.lon, query.lat, query.radius_m]
-
-            if query.winter_only:
-                placeholders = ", ".join([f"'{s}'" for s in WINTER_SURFACES])
-                where_clauses.append(f"LOWER(r.surface_condition) IN ({placeholders})")
-
-            join_clause = ""
-            if query.road_user_filter:
-                join_clause = """
-                    INNER JOIN (
-                        SELECT DISTINCT accident_id
-                        FROM accident_participants
-                        WHERE LOWER(vehicle_type) = LOWER($4)
-                    ) p ON r.accident_id = p.accident_id
-                """
-                params.append(query.road_user_filter.strip())
-
             sql = f"""
                 WITH target AS (
                     SELECT ST_Transform(ST_Point($1, $2), 'EPSG:4326', 'EPSG:3067', always_xy := true) AS pt
@@ -187,7 +201,6 @@ class SpatialRiskEngine:
         finally:
             con.close()
 
-        reference_year = query.reference_year if query.reference_year is not None else self.latest_data_year()
         decay_lambda = math.log(2.0) / query.half_life_years
         raw_points = 0.0
         decayed_index = 0.0
@@ -235,6 +248,7 @@ class SpatialRiskEngine:
             lon=query.lon,
             radius_m=query.radius_m,
             lang=query.lang,
+            reference_year=reference_year,
             total_accidents=len(rows),
             raw_severity_points=round(raw_points, 2),
             decayed_risk_index=round(decayed_index, 2),

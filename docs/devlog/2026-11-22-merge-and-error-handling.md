@@ -64,3 +64,22 @@ After the change, the files were byte-for-byte identical. The characterization t
 `EXPLAIN` shows the R-tree index is used, so this isn't a missing index. Returning 4,659 rows and computing their distances simply costs that much. I didn't optimize further: Phases 1–2 replace radius queries with precomputed tiles (ADR-0003), where a lookup is a memory access.
 
 **Lesson:** a performance claim without a profile is a guess. CLAUDE.md already says "measure, don't guess"; this time the guess had slipped in while the status file was being written.
+
+### What the code review caught
+
+`/code-review medium` on this branch reported 8 findings. All were checked, all were real, and all were fixed in a second commit, test-first where they were bugs:
+
+| Finding | Why it matters | Fix |
+|---|---|---|
+| The response didn't say which reference year was used | A score could change after a data refresh with no visible reason, so it can't be reproduced | `RiskProfile.reference_year` |
+| `MAX(year)` is NULL for an empty table | `None - None` raises a TypeError, which becomes a 500; and the cache never fills | Fall back to the calendar year; cache only an int |
+| `close()` kept the cached year | Reconnecting to rebuilt data still used the old year | Reset it in `close()` |
+| A breaking field rename while the API still said 1.0.0 | Clients get no signal | API version 2.0.0 |
+| Route endpoint had no `lang` | Same gap as #6, missed on the second endpoint | `RouteCorridorRequest.lang` |
+| Tests pinned 2025 | They would fail on correct code once 2026 data arrives: the very thing #4 removed | Compare against `MAX(year)` |
+| **`reference_year=2018` still counted 2019–2025 crashes, at full weight** | "Risk as of 2018" was inflated by the future | SQL now excludes `year > reference_year` |
+| Winter values spliced into the SQL text | Safe today, but one quote in a future label breaks every winter query | Passed as a list parameter (`= ANY($n)`) |
+
+The future-crash bug existed before this branch (`max(0, age)` quietly turned negative ages into "brand new"). Making `reference_year` easier to see made it worth fixing now.
+
+**Lesson:** the reviewer saw *consequences across time* (data refreshes, a future 2026 load), which the snapshot test can't, because it only compares today's data.
