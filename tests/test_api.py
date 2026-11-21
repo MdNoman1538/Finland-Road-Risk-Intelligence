@@ -40,3 +40,36 @@ def test_point_risk_rejects_out_of_range_latitude():
 def test_route_risk_requires_at_least_one_waypoint():
     response = client.post("/api/v1/risk/route", json={"waypoints": []})
     assert response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "kwargs"),
+    [
+        ("post", "/api/v1/risk/point", {"json": {"lat": 65.0, "lon": 25.0}}),
+        ("get", "/api/v1/risk/point", {"params": {"lat": 65.0, "lon": 25.0}}),
+        ("post", "/api/v1/risk/route", {"json": {"waypoints": [[65.0, 25.0]]}}),
+    ],
+)
+def test_internal_errors_do_not_leak_details(monkeypatch, tmp_path, method, path, kwargs):
+    """Known issue #10: a 500 must not reveal paths, SQL or exception text to the client.
+    The full error goes to the server log under an id the client can quote."""
+    monkeypatch.setattr(api, "engine", SpatialRiskEngine(db_path=tmp_path / "secret-dir" / "missing.duckdb"))
+    unsafe_client = TestClient(api.app, raise_server_exceptions=False)
+    response = getattr(unsafe_client, method)(path, **kwargs)
+    assert response.status_code == 500
+    assert "secret-dir" not in response.text
+    assert "duckdb" not in response.text.lower()
+    body = response.json()
+    assert body["detail"] == "Internal server error"
+    assert len(body["error_id"]) == 12
+
+
+def test_internal_error_details_go_to_the_server_log(monkeypatch, tmp_path, caplog):
+    monkeypatch.setattr(api, "engine", SpatialRiskEngine(db_path=tmp_path / "secret-dir" / "missing.duckdb"))
+    unsafe_client = TestClient(api.app, raise_server_exceptions=False)
+    with caplog.at_level("ERROR", logger="src.api.main"):
+        response = unsafe_client.get("/api/v1/risk/point", params={"lat": 65.0, "lon": 25.0})
+    error_id = response.json()["error_id"]
+    record = next(r for r in caplog.records if error_id in r.getMessage())
+    assert record.exc_info is not None
+    assert "secret-dir" in str(record.exc_info[1])  # the operator still sees the real cause

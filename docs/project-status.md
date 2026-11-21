@@ -1,6 +1,6 @@
 # Project Status
 
-**As of:** 2026-11-21 · Module structure: see [architecture.md](architecture.md). · **Current phase:** [Phase 0](roadmap.md#phase-0--engineering-foundations), in progress. Three PRs prepared locally (not yet pushed): workflow/docs, tooling/CI, spatial-extension fix. 46 tests passing.
+**As of:** 2026-11-22 · Module structure: see [architecture.md](architecture.md). · **Current phase:** [Phase 0](roadmap.md#phase-0--engineering-foundations), in progress. PRs #1–#4 (workflow/docs, tooling/CI, spatial-extension fix, module refactor) are merged; `main` is protected and requires the checks *Lint & dependency checks* and *Tests*. 53 tests passing.
 
 ## Summary
 
@@ -80,7 +80,7 @@ Measured 2026-11-21 on an Apple M3 with 16 GB, DuckDB 2.0.0, on a scratch copy o
 | 7 | ✅ ~~No tests, no CI, no lint.~~ Addressed by the tooling/CI PR (uv, ruff, pytest, pre-commit, GitHub Actions). The fix PR adds integration tests: characterization tests, concurrency, health check, dashboard smoke test. 46 tests total. | Repo, git history. | High (for an industry goal) | Phase 0 ([ADR-0004](decisions/0004-development-workflow.md)) |
 | 8 | The 38 MB `.duckdb` file is committed to git. | `git ls-files`. | Medium | Phase 0 |
 | 9 | The code license is CC BY-NC (non-commercial), which blocks industry use. | `LICENSE`. | Decision needed before approaching industry | Phase 10 |
-| 10 | `POST /api/v1/risk/point` returns the raw exception text in its 500 response. That can leak internals (paths, SQL). | `api/main.py`. | Medium (security hygiene) | Phase 0 |
+| 10 | ✅ **Fixed:** one app-wide handler logs the full error under a 12-character id and returns only `{"detail": "Internal server error", "error_id": …}` (tests `test_internal_errors_do_not_leak_details`, `test_internal_error_details_go_to_the_server_log`). Original issue: `POST /api/v1/risk/point` returned the raw exception text in its 500 response, including the full database path. | Reproduced: the response contained `…/missing.duckdb" in read-only mode: database does not exist`. | Medium (security hygiene) | Phase 0 |
 | 11 | Large radii are slow in Python, not SQL. `evaluate_point` builds a Pydantic object and translations for *every* matching crash (4,659 at Helsinki 2 km), then keeps only 15. 2 km lookups stay at ~80 ms. | Benchmark below; code inspection. | Low (the radius engine gets replaced in Phases 1–2) | Phase 0 or 2 |
 
 ## 5. Gap analysis: what the goal needs vs what we have
