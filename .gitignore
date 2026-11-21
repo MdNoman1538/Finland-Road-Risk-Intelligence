@@ -4,3 +4,8 @@ __pycache__/
 .env
 data/raw/
 models/*.joblib
+
+# Tooling
+.venv/
+.pytest_cache/
+.ruff_cache/

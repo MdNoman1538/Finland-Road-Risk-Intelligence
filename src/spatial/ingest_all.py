@@ -1,4 +1,5 @@
 from pathlib import Path
+
 import duckdb
 import pandas as pd
 
@@ -21,7 +22,7 @@ def detect_file_format(csv_path: Path) -> tuple[str, str, list[str]]:
 
     for enc in encodings:
         try:
-            with open(csv_path, "r", encoding=enc) as f:
+            with open(csv_path, encoding=enc) as f:
                 first_line = f.readline().strip()
                 if not first_line:
                     continue
@@ -38,7 +39,8 @@ def detect_file_format(csv_path: Path) -> tuple[str, str, list[str]]:
 def get_unique_csvs(keyword_include: list[str], keyword_exclude: list[str]) -> list[Path]:
     all_csvs = sorted(RAW_DATA_DIR.glob("**/*.csv"))
     filtered = [
-        p for p in all_csvs
+        p
+        for p in all_csvs
         if any(k in p.name.lower() for k in keyword_include)
         and not any(k in p.name.lower() for k in keyword_exclude)
     ]
@@ -84,7 +86,7 @@ def ingest_accidents(con: duckdb.DuckDBPyConnection):
             # Legacy Schema (2014–2021)
             query = f"""
                 INSERT INTO road_accidents
-                SELECT 
+                SELECT
                     CAST(Onnett_id AS VARCHAR) AS accident_id,
                     CAST(Vuosi AS INTEGER) AS year,
                     CAST(Kk AS INTEGER) AS month,
@@ -106,10 +108,14 @@ def ingest_accidents(con: duckdb.DuckDBPyConnection):
             """
         else:
             # Modern Schema (2022–2025)
-            region_col = '"Maakunta (koordinaattien perusteella)"' if "Maakunta (koordinaattien perusteella)" in cols else '"Maakunta"'
+            region_col = (
+                '"Maakunta (koordinaattien perusteella)"'
+                if "Maakunta (koordinaattien perusteella)" in cols
+                else '"Maakunta"'
+            )
             query = f"""
                 INSERT INTO road_accidents
-                SELECT 
+                SELECT
                     CAST("OnnettomuusID" AS VARCHAR) AS accident_id,
                     CAST(Vuosi AS INTEGER) AS year,
                     CAST(Kuukausi AS INTEGER) AS month,
@@ -134,7 +140,10 @@ def ingest_accidents(con: duckdb.DuckDBPyConnection):
     print("  -> Building R-Tree spatial index on geom_3067...")
     con.execute("CREATE INDEX IF NOT EXISTS idx_accidents_geom ON road_accidents USING RTREE (geom_3067);")
     con.execute("CREATE INDEX IF NOT EXISTS idx_accidents_id ON road_accidents (accident_id);")
-    con.execute("CREATE INDEX IF NOT EXISTS idx_accidents_region_muni ON road_accidents (region, municipality);")
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_accidents_region_muni ON road_accidents (region, municipality);"
+    )
+
 
 def ingest_participants(con: duckdb.DuckDBPyConnection):
     part_csvs = get_unique_csvs(["osallinen", "osalliset"], [])
@@ -162,24 +171,32 @@ def ingest_participants(con: duckdb.DuckDBPyConnection):
 
         if "Onnett_id" in df.columns:
             # Legacy Schema (2014–2021)
-            mapped = pd.DataFrame({
-                "accident_id": df["Onnett_id"].astype(str),
-                "participant_id": df["Osall_id"].astype(str),
-                "participant_no": pd.to_numeric(df["Osnro"], errors="coerce"),
-                "vehicle_type": df["Oslajisel"].fillna("Unknown").astype(str).str.lower().str.strip(),
-                "vehicle_age": pd.to_numeric(df["Ajoneuvika"], errors="coerce"),
-                "vehicle_mass_kg": pd.to_numeric(df["Ajoneuvmas"], errors="coerce"),
-            })
+            mapped = pd.DataFrame(
+                {
+                    "accident_id": df["Onnett_id"].astype(str),
+                    "participant_id": df["Osall_id"].astype(str),
+                    "participant_no": pd.to_numeric(df["Osnro"], errors="coerce"),
+                    "vehicle_type": df["Oslajisel"].fillna("Unknown").astype(str).str.lower().str.strip(),
+                    "vehicle_age": pd.to_numeric(df["Ajoneuvika"], errors="coerce"),
+                    "vehicle_mass_kg": pd.to_numeric(df["Ajoneuvmas"], errors="coerce"),
+                }
+            )
         else:
             # Modern Schema (2022–2025)
-            mapped = pd.DataFrame({
-                "accident_id": df["OnnettomuusID"].astype(str),
-                "participant_id": df["Tekninen osallinen ID"].astype(str),
-                "participant_no": pd.to_numeric(df["Osallisen numero"], errors="coerce"),
-                "vehicle_type": df["Osallisen lajikoodi"].fillna("Unknown").astype(str).str.lower().str.strip(),
-                "vehicle_age": pd.to_numeric(df["Ajoneuvon ikä"], errors="coerce"),
-                "vehicle_mass_kg": pd.to_numeric(df["Ajoneuvon massa"], errors="coerce"),
-            })
+            mapped = pd.DataFrame(
+                {
+                    "accident_id": df["OnnettomuusID"].astype(str),
+                    "participant_id": df["Tekninen osallinen ID"].astype(str),
+                    "participant_no": pd.to_numeric(df["Osallisen numero"], errors="coerce"),
+                    "vehicle_type": df["Osallisen lajikoodi"]
+                    .fillna("Unknown")
+                    .astype(str)
+                    .str.lower()
+                    .str.strip(),
+                    "vehicle_age": pd.to_numeric(df["Ajoneuvon ikä"], errors="coerce"),
+                    "vehicle_mass_kg": pd.to_numeric(df["Ajoneuvon massa"], errors="coerce"),
+                }
+            )
 
         # Clean negative sentinel values (-1) used in legacy Finnish datasets
         mapped.loc[mapped["vehicle_age"] < 0, "vehicle_age"] = None
@@ -205,22 +222,22 @@ def main():
     acc_cnt = con.execute("SELECT COUNT(*) FROM road_accidents;").fetchone()[0]
     part_cnt = con.execute("SELECT COUNT(*) FROM accident_participants;").fetchone()[0]
     top_vehicles = con.execute("""
-        SELECT vehicle_type, COUNT(*) AS cnt 
-        FROM accident_participants 
-        GROUP BY vehicle_type 
-        ORDER BY cnt DESC 
+        SELECT vehicle_type, COUNT(*) AS cnt
+        FROM accident_participants
+        GROUP BY vehicle_type
+        ORDER BY cnt DESC
         LIMIT 8;
     """).fetchall()
     oulu_winter = con.execute("""
-        SELECT surface_condition, COUNT(*) 
-        FROM road_accidents 
-        WHERE municipality = 'Oulu' 
-        GROUP BY surface_condition 
-        ORDER BY COUNT(*) DESC 
+        SELECT surface_condition, COUNT(*)
+        FROM road_accidents
+        WHERE municipality = 'Oulu'
+        GROUP BY surface_condition
+        ORDER BY COUNT(*) DESC
         LIMIT 5;
     """).fetchall()
 
-    print(f"\n=== STEP 1 COMPLETE ===")
+    print("\n=== STEP 1 COMPLETE ===")
     print(f"Total Accidents:    {acc_cnt:,}")
     print(f"Total Participants: {part_cnt:,}")
     print("\nTop Road User / Vehicle Categories:")

@@ -19,19 +19,23 @@ A spatial, bilingual (EN / FI) road safety analytics platform built on official 
 
 ## Quick Start
 
-1. Activate environment and install dependencies:
-   conda activate ailearn
-   pip install -r requirements.txt
+Requires [uv](https://docs.astral.sh/uv/) (`brew install uv`).
 
-2. Rebuild the DuckDB spatial warehouse (optional — pre-built data/processed/road_risk.duckdb is included):
-   Download the 2014–2025 CSV datasets from https://aineistot.vayla.fi/spa/ava/Tie/Tieliikenneonnettomuudet/, place them in data/raw/, and run:
-   python src/spatial/ingest_all.py
+1. Install the exact locked dependencies (creates `.venv/`):
+   `uv sync`
+
+2. Rebuild the DuckDB spatial warehouse (optional — pre-built `data/processed/road_risk.duckdb` is included):
+   Download the 2014–2025 CSV datasets from https://aineistot.vayla.fi/spa/ava/Tie/Tieliikenneonnettomuudet/, place them in `data/raw/`, and run:
+   `uv run python src/spatial/ingest_all.py`
 
 3. Start the FastAPI backend:
-   uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+   `uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload`
 
 4. Start the Streamlit map explorer (in a second terminal):
-   PYTHONPATH=. python -m streamlit run src/ui/app.py
+   `PYTHONPATH=. uv run streamlit run src/ui/app.py`
+
+5. Run the checks (same as CI):
+   `uv run ruff check . && uv run pytest`
 
 ## Documentation & Contributing
 

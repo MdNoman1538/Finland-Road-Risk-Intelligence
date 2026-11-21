@@ -1,6 +1,6 @@
-from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
+
 from src.scoring import RiskProfile, RiskQuery, SpatialRiskEngine
 
 app = FastAPI(
@@ -16,7 +16,7 @@ class RouteCorridorRequest(BaseModel):
     waypoints: list[tuple[float, float]]  # List of (lat, lon) pairs
     radius_m: float = 150.0
     winter_only: bool = False
-    road_user_filter: Optional[str] = None
+    road_user_filter: str | None = None
 
 
 class RouteCorridorResponse(BaseModel):
@@ -37,7 +37,7 @@ def evaluate_point_risk(query: RiskQuery):
     try:
         return engine.evaluate_point(query)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/api/v1/risk/point", response_model=RiskProfile)
@@ -46,7 +46,7 @@ def evaluate_point_risk_get(
     lon: float = Query(..., ge=-180.0, le=180.0),
     radius_m: float = Query(250.0, gt=0.0, le=10000.0),
     winter_only: bool = Query(False),
-    road_user_filter: Optional[str] = Query(None),
+    road_user_filter: str | None = Query(None),
 ):
     query = RiskQuery(
         lat=lat,

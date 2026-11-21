@@ -47,6 +47,32 @@ Branch protection can only *require* CI checks once a CI workflow exists and has
 3. switch on protection
 4. the bug-fix PR, which will then be the first one gated by CI
 
+## PR 2: tooling and CI (branch `chore/tooling-and-ci`, stacked on PR 1)
+
+### What was built
+- **`pyproject.toml` + `uv.lock`.** One source of truth for dependencies and tool config. `uv` resolves and pins all 70 packages.
+- **`requirements.txt` is now generated** (`uv export`), because Render installs with pip. A pre-commit hook regenerates it, and CI fails if it drifts from the lock. The old file had only `>=` lower bounds, so every Render build could get different versions. Now local, CI and Render get the same ones.
+- **ruff** (lint and format): rules E, F, W, I, B, UP, SIM; line length 110; E501 ignored because the formatter owns line length.
+- **pytest:** 36 unit tests to start (translations, tier boundaries, input validation, API contract). None of them needs the spatial extension.
+- **pre-commit hooks:** `no-commit-to-branch` enforces the workflow locally; also blocks large files, detects private keys, runs ruff, and keeps the lock and export in sync.
+- **GitHub Actions CI:**
+  - two jobs: lint/dependency checks, and tests
+  - read-only permissions; cancels runs made outdated by a newer push
+  - actions pinned to exact versions found with `git ls-remote`, not guessed
+
+### Surprises and lessons
+1. **The Render bug reproduced itself on our machine.** `uv` resolved DuckDB **2.0.1** (the conda env has 2.0.0). DuckDB stores extensions per version (`~/.duckdb/extensions/v2.0.1/`), so `LOAD spatial` failed exactly as on Render. Any DuckDB upgrade triggers the bug, not only a fresh server. More evidence for the fix in PR 3.
+2. **Checked that formatting didn't change behaviour.** We ran the engine on Oulu (250 m) and Helsinki (2 km) before and after the mechanical formatting commit. Outputs were identical (95 / 57.8 / HIGH and 4659 / 50.9 / HIGH).
+3. **`.git-blame-ignore-revs` was tried and dropped.** It lists bulk-formatting commits for `git blame` to skip. But we squash-merge, so the formatting commit's SHA disappears at merge time. The squashed commit also contains real changes, so ignoring it would hide them. For ~1,200 lines of code it isn't worth a separate PR. Recorded so we don't try it again without a reason.
+4. **The format check caught our own new test file on the first run.** Expected; the tooling works.
+5. **The silent `try/except: pass` around `INSTALL spatial`** in the dashboard is marked `noqa` with a pointer to the known issue, rather than "fixed" with `contextlib.suppress`, which would hide the problem behind tidier syntax. PR 3 removes it.
+
+### Follow-ups noted
+- Starlette warns that using `httpx` with its test client is deprecated. Check the recommended replacement when FastAPI's TestClient updates.
+- Pin GitHub Actions to commit SHAs instead of tags (supply-chain hardening), probably in Phase 10.
+- The package is literally named `src` (`from src.scoring import …`). That's unusual, but renaming is a larger refactor, deferred.
+
 ## Next
 
-PR 2: `pyproject.toml` + `uv`, ruff, pytest, pre-commit, GitHub Actions CI.
+1. Push PRs 1 and 2 and switch on branch protection once CI has run.
+2. PR 3: test-first fix for the spatial extension, persistent connection, and a health check that actually exercises the database.

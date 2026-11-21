@@ -76,6 +76,33 @@ AI agents speed up the work, but accountability stays with the human. The rules:
 3. **Review every diff.** Never merge code you haven't read and understood. If you don't understand it, ask for an explanation. That is part of learning, not a delay.
 4. **The agent follows this document** and the project rules in [CLAUDE.md](CLAUDE.md).
 
+## Setup (once)
+
+```bash
+# Requires uv: https://docs.astral.sh/uv/  (brew install uv)
+uv sync                          # creates .venv with exact locked versions (incl. dev tools)
+uv run pre-commit install        # run checks automatically on every commit
+```
+
 ## Local checks
 
-Tooling is being set up in Phase 0; this section will list the exact commands once it lands.
+These are the same checks CI runs ([.github/workflows/ci.yml](.github/workflows/ci.yml)):
+
+```bash
+uv run ruff check .              # lint
+uv run ruff format .             # auto-format (CI runs: ruff format --check .)
+uv run pytest                    # tests
+uv run pre-commit run --all-files   # every hook on every file
+```
+
+The pre-commit hooks also:
+- **refuse commits on `main`**
+- block files over 1 MB
+- detect private keys
+- keep `uv.lock` and `requirements.txt` in sync with `pyproject.toml`
+
+## Dependencies
+
+- Add or remove a dependency with `uv add <pkg>` / `uv remove <pkg>` (dev tools: `uv add --dev <pkg>`). Never edit `requirements.txt` by hand.
+- `pyproject.toml` declares what we depend on, and `uv.lock` pins the exact versions.
+- `requirements.txt` is **generated** from the lock, because Render installs with pip. The pre-commit hook regenerates it, and CI fails if it drifts.
