@@ -33,6 +33,12 @@ A spatial, bilingual (EN / FI) road safety analytics platform built on official 
 4. Start the Streamlit map explorer (in a second terminal):
    PYTHONPATH=. python -m streamlit run src/ui/app.py
 
+## Documentation & Contributing
+
+- [docs/](docs/README.md): roadmap, current project status, architecture decision records (ADRs) and the development log.
+- [CONTRIBUTING.md](CONTRIBUTING.md): development workflow (GitHub Flow, Conventional Commits, Definition of Done).
+- [CLAUDE.md](CLAUDE.md): project rules for AI coding agents.
+
 ## License
 
 - Source Code: Licensed under CC BY-NC 4.0 (Non-Commercial use only — see LICENSE).
