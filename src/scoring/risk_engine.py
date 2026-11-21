@@ -1,19 +1,18 @@
 import math
+import threading
 from pathlib import Path
 from typing import Literal
 
 import duckdb
 from pydantic import BaseModel, Field
 
+from src.db import DB_PATH, connect_spatial
 from src.i18n import (
     translate_accident_type,
     translate_lighting,
     translate_severity,
     translate_surface,
 )
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = PROJECT_ROOT / "data" / "processed" / "road_risk.duckdb"
 
 SEVERITY_WEIGHTS: dict[str, float] = {
     "Kuolemaan johtanut": 10.0,
@@ -71,13 +70,39 @@ class RiskProfile(BaseModel):
 
 
 class SpatialRiskEngine:
-    def __init__(self, db_path: Path = DB_PATH):
-        self.db_path = db_path
+    """Radius-based spatial risk scoring over the DuckDB crash warehouse.
 
-    def _connect(self) -> duckdb.DuckDBPyConnection:
-        con = duckdb.connect(str(self.db_path), read_only=True)
-        con.execute("LOAD spatial;")
-        return con
+    Holds ONE database connection for its lifetime (opening a connection and loading
+    the spatial extension costs ~56 ms, measured 2026-11-21, see ADR-0003). Each unit of
+    work uses its own cursor, because a DuckDB connection must not be shared between
+    threads (FastAPI runs sync endpoints in a thread pool), while cursors may.
+    """
+
+    def __init__(self, db_path: Path = DB_PATH, extension_directory: Path | None = None):
+        self.db_path = db_path
+        # Where DuckDB stores extensions. None = DuckDB default (~/.duckdb/extensions).
+        # Tests point this at an empty directory to simulate a fresh machine.
+        self.extension_directory = extension_directory
+        self._con: duckdb.DuckDBPyConnection | None = None
+        self._con_lock = threading.Lock()
+
+    def _connection(self) -> duckdb.DuckDBPyConnection:
+        # Lazy, so that creating the engine (e.g. at API import time) never touches the DB.
+        if self._con is None:
+            with self._con_lock:
+                if self._con is None:  # double-checked: another thread may have won the race
+                    self._con = connect_spatial(self.db_path, extension_directory=self.extension_directory)
+        return self._con
+
+    def cursor(self) -> duckdb.DuckDBPyConnection:
+        """A thread-safe handle for one unit of work. Close it when done."""
+        return self._connection().cursor()
+
+    def close(self) -> None:
+        with self._con_lock:
+            if self._con is not None:
+                self._con.close()
+                self._con = None
 
     @staticmethod
     def _classify_tier(score: float) -> str:
@@ -90,7 +115,7 @@ class SpatialRiskEngine:
         return "LOW"
 
     def evaluate_point(self, query: RiskQuery) -> RiskProfile:
-        con = self._connect()
+        con = self.cursor()
         try:
             where_clauses = ["ST_DWithin(r.geom_3067, t.pt, $3)"]
             params: list = [query.lon, query.lat, query.radius_m]

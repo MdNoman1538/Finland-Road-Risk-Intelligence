@@ -72,7 +72,54 @@ Branch protection can only *require* CI checks once a CI workflow exists and has
 - Pin GitHub Actions to commit SHAs instead of tags (supply-chain hardening), probably in Phase 10.
 - The package is literally named `src` (`from src.scoring import …`). That's unusual, but renaming is a larger refactor, deferred.
 
+## PR 3: spatial-extension fix (branch `fix/spatial-extension-install`, stacked on PR 2)
+
+### Test-first, step by step
+1. **Seam.** We added an optional `extension_directory` to `SpatialRiskEngine`, passed through to DuckDB's config. No behaviour change when unset. It lets a test simulate a fresh machine by pointing DuckDB at an empty folder.
+2. **Failing test, committed on its own.** `test_engine_works_with_an_empty_extension_directory` failed with `IO Error: Extension ... spatial.duckdb_extension not found`, the exact Render error. It failed *for the right reason*, not because of a typo or import error.
+3. **Fix.**
+   - New `src/db.py` → `connect_spatial()`: the only place the app opens DuckDB. It always runs `install_extension` before `load_extension`, and closes the connection and re-raises if either fails.
+   - Engine: one lazily created connection, guarded by a lock, plus a `cursor()` per unit of work.
+   - Dashboard: uses the engine's connection; the silent `try/except: pass` is gone.
+   - `/health` is now a real readiness check.
+4. **The same test passes.**
+
+### Assumptions checked rather than trusted
+- **Does `INSTALL` hit the network on every start?** That would break offline use, which matters for a car. Timed each step: open 10 ms, install (already present) **0.3 ms**, load 44 ms. No network call; offline start works once the extension is installed.
+- **Do cursors share the loaded extension, and does closing one leave the parent open?** Yes to both, verified directly.
+- **Is the engine thread-safe?** Test: 40 calls across 8 threads, all identical results.
+
+### Surprise: a test that passed alone failed in the full suite
+`Connection Error: Can't open a connection to same database file with a different configuration than existing connections.` Within one process, DuckDB shares one database instance per file. Once other tests held a connection, our regression test (which uses a different extension directory) couldn't open the same file. The fix: the test uses its own copy of the database.
+
+*Lesson:* always run the full suite, not only the new test. We also ran the suite in 3 shuffled file orders to check for other order dependencies: all green.
+
+### Health check redesign
+- **Before:** `/health` returned `{"status": "ok", "database": "<server filesystem path>"}` without touching the DB. It passed while the API was broken, and it leaked a server path.
+- **Now:** it runs a real query plus a spatial function. It returns `503 {"status": "unavailable", "error": "<ExceptionType>"}` on failure and never includes paths.
+- This matters because **Render uses `/health` to decide whether a deploy succeeded**. A shallow check turns a broken deploy into a "healthy" one.
+
+### Characterization tests
+We pinned today's outputs (Oulu 250 m → 95 / 57.8 / HIGH; Helsinki 2 km → 4659 / 50.9 / HIGH). They don't claim the scores are *right*; they prove that refactors don't *change* them. When data hygiene or Phase 2 changes the numbers on purpose, the test is updated in the same PR, with the reason given.
+
+### Dashboard smoke test
+Streamlit's `AppTest` runs `app.py` headless in English and Finnish and asserts no exceptions and that the headline metrics are present. First attempt failed because `AppTest.from_file` resolves relative paths from the test file's folder, so we use an absolute path.
+
+### Small cleanup in code already being touched
+The dashboard's `_db_path` parameter was unused. A leading `_` also excludes a parameter from Streamlit's cache key, so it never acted as a cache key either. Removed.
+
+### Measured result
+- 250 m lookup: 78 → **15 ms**
+- 2 km lookup: 124 → **80 ms**
+- 100-waypoint route: **1.16 s**
+
+The old "~8 s" for the route was an estimate (100 × 78 ms) and is labelled as such in the status file. The 2 km case stays slow because of Python-side processing of every matching row. Recorded as known issue #11 and deliberately not fixed here: one purpose per PR.
+
 ## Next
 
-1. Push PRs 1 and 2 and switch on branch protection once CI has run.
-2. PR 3: test-first fix for the spatial extension, persistent connection, and a health check that actually exercises the database.
+1. Push PRs 1–3, open them on GitHub, switch on branch protection once CI has run once.
+2. Remaining Phase 0 PRs:
+   - exception text leak (#10)
+   - data hygiene: missing-value spellings, duplicate ID, dynamic reference year
+   - move the DB file out of git (needs an ADR, because Render deploys depend on it)
+   - exploration scripts → tests or delete

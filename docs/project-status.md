@@ -1,6 +1,6 @@
 # Project Status
 
-**As of:** 2026-11-21 · **Current phase:** [Phase 0](roadmap.md#phase-0--engineering-foundations), in progress. Workflow/docs PR and tooling/CI PR prepared locally (not yet pushed). Spatial-extension fix is next.
+**As of:** 2026-11-21 · **Current phase:** [Phase 0](roadmap.md#phase-0--engineering-foundations), in progress. Three PRs prepared locally (not yet pushed): workflow/docs, tooling/CI, spatial-extension fix. 46 tests passing.
 
 ## Summary
 
@@ -53,6 +53,14 @@ Measured 2026-11-21 on an Apple M3 with 16 GB, DuckDB 2.0.0, on a scratch copy o
 | In-memory numpy scan of all 180k points (2.9 MB) | 0.3 ms |
 | In-memory KD-tree lookup | 0.004 ms |
 
+**After the spatial-extension fix** (persistent connection + cursor per call; same machine and method, DuckDB 2.0.1):
+
+| Approach | Latency |
+|---|---|
+| `evaluate_point`, 250 m | **15.3 ms** (max 26 ms), was 78 ms |
+| `evaluate_point`, 2 km | **79.8 ms** (max 136 ms), was 124 ms; the remaining cost is Python-side (known issue #11) |
+| 100-waypoint route, 150 m radius | **1.16 s** measured; before: ~8 s *estimated* (100 × 78 ms), not measured |
+
 **How to read this:**
 - The R-tree index *is* used. The main cost is reconnecting to the database on every request.
 - A 100-waypoint route currently takes about 8 s.
@@ -63,15 +71,17 @@ Measured 2026-11-21 on an Apple M3 with 16 GB, DuckDB 2.0.0, on a scratch copy o
 
 | # | Issue | Evidence | Severity | Fix in |
 |---|---|---|---|---|
-| 1 | **The API fails on a fresh server.** The engine only runs `LOAD spatial`. The last commit (7a0dd11) added `INSTALL` only to the dashboard's hotspot function. | Bare `LOAD spatial` against an empty extension directory → `IO Error: Extension ... not found`. `/health` still passes because it never touches the DB, so Render shows the service as healthy while `/api/v1/risk/*` errors. Also reproduced locally after a DuckDB 2.0.0 → 2.0.1 upgrade, because extensions are stored per version. | High (deployed demo is broken) | Phase 0, first task |
-| 2 | The dashboard works on Render only by luck of ordering. The hotspot function happens to install the extension before the engine runs. | Code order in `app.py`. | Medium | Phase 0 |
-| 3 | A new DB connection is opened on every request. | Benchmark above. | Medium | Phase 0 |
+| 1 | ✅ **Fixed in the spatial-extension PR** (`src/db.py` installs before loading; regression test `tests/test_spatial_extension.py`). Original issue: **the API fails on a fresh server.** The engine only runs `LOAD spatial`. The last commit (7a0dd11) added `INSTALL` only to the dashboard's hotspot function. | Bare `LOAD spatial` against an empty extension directory → `IO Error: Extension ... not found`. `/health` still passes because it never touches the DB, so Render shows the service as healthy while `/api/v1/risk/*` errors. Also reproduced locally after a DuckDB 2.0.0 → 2.0.1 upgrade, because extensions are stored per version. | High (deployed demo is broken) | Phase 0, first task |
+| 2 | ✅ **Fixed** (the dashboard now uses the engine's shared connection; smoke test `tests/test_dashboard.py`). Original issue: the dashboard works on Render only by luck of ordering. The hotspot function happens to install the extension before the engine runs. | Code order in `app.py`. | Medium | Phase 0 |
+| 3 | ✅ **Fixed:** one persistent connection, one cursor per request (thread-safe; tested with 8 threads). 250 m lookup 78 → 15 ms. | Benchmark above. | Medium | Phase 0 |
 | 4 | `reference_year` is hard-coded to 2025. | `RiskQuery` default. | Low | Phase 0 |
 | 5 | `nearest_incidents` actually returns the 15 highest-*weighted* incidents, not the nearest. | `risk_engine.py`. | Low (naming) | Phase 0 |
 | 6 | The GET point endpoint has no `lang` parameter. The route endpoint calls the private `_classify_tier`. | `api/main.py`. | Low | Phase 0 |
-| 7 | ~~No tests, no CI, no lint.~~ Addressed by the tooling/CI PR: uv, ruff, pytest (36 unit tests), pre-commit, GitHub Actions. Still missing: integration tests that use the DB. | Repo, git history. | High (for an industry goal) | Phase 0 ([ADR-0004](decisions/0004-development-workflow.md)) |
+| 7 | ✅ ~~No tests, no CI, no lint.~~ Addressed by the tooling/CI PR (uv, ruff, pytest, pre-commit, GitHub Actions). The fix PR adds integration tests: characterization tests, concurrency, health check, dashboard smoke test. 46 tests total. | Repo, git history. | High (for an industry goal) | Phase 0 ([ADR-0004](decisions/0004-development-workflow.md)) |
 | 8 | The 38 MB `.duckdb` file is committed to git. | `git ls-files`. | Medium | Phase 0 |
 | 9 | The code license is CC BY-NC (non-commercial), which blocks industry use. | `LICENSE`. | Decision needed before approaching industry | Phase 10 |
+| 10 | `POST /api/v1/risk/point` returns the raw exception text in its 500 response. That can leak internals (paths, SQL). | `api/main.py`. | Medium (security hygiene) | Phase 0 |
+| 11 | Large radii are slow in Python, not SQL. `evaluate_point` builds a Pydantic object and translations for *every* matching crash (4,659 at Helsinki 2 km), then keeps only 15. 2 km lookups stay at ~80 ms. | Benchmark below; code inspection. | Low (the radius engine gets replaced in Phases 1–2) | Phase 0 or 2 |
 
 ## 5. Gap analysis: what the goal needs vs what we have
 
