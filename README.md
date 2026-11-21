@@ -11,7 +11,7 @@ A spatial, bilingual (EN / FI) road safety analytics platform built on official 
 
 ## Features
 
-- Multi-Schema Spatial Ingestion (src/spatial/ingest_all.py): Harmonizes legacy (2014–2021) and modern (2022–2025) Väylävirasto schemas across UTF-8, ISO-8859-1, and UTF-16 LE encodings, projecting ETRS-TM35FIN (EPSG:3067) metric geometries alongside WGS84 (EPSG:4326) coordinates with an R-Tree spatial index.
+- Multi-Schema Spatial Ingestion (src/ingestion/ingest_all.py): Harmonizes legacy (2014–2021) and modern (2022–2025) Väylävirasto schemas across UTF-8, ISO-8859-1, and UTF-16 LE encodings, projecting ETRS-TM35FIN (EPSG:3067) metric geometries alongside WGS84 (EPSG:4326) coordinates with an R-Tree spatial index.
 - Deterministic Spatial Risk Engine (src/scoring/risk_engine.py): Evaluates radial buffers using severity weights, 5-year half-life exponential temporal decay, linear distance attenuation, and area-normalized 0–100 risk calibration.
 - Bilingual Taxonomy Layer (src/i18n/translator.py): Preserves canonical Finnish keys in DuckDB while translating severities, road surfaces, lighting, participant types, and all 80+ Väylävirasto collision mechanisms into English.
 - FastAPI Backend (src/api/main.py): Provides /health, /api/v1/risk/point, and /api/v1/risk/route endpoints.
@@ -26,7 +26,7 @@ Requires [uv](https://docs.astral.sh/uv/) (`brew install uv`).
 
 2. Rebuild the DuckDB spatial warehouse (optional — pre-built `data/processed/road_risk.duckdb` is included):
    Download the 2014–2025 CSV datasets from https://aineistot.vayla.fi/spa/ava/Tie/Tieliikenneonnettomuudet/, place them in `data/raw/`, and run:
-   `uv run python src/spatial/ingest_all.py`
+   `uv run python src/ingestion/ingest_all.py`
 
 3. Start the FastAPI backend:
    `uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload`
@@ -36,6 +36,10 @@ Requires [uv](https://docs.astral.sh/uv/) (`brew install uv`).
 
 5. Run the checks (same as CI):
    `uv run ruff check . && uv run pytest`
+
+## Architecture
+
+One job per module (`core`, `ingestion`, `scoring`, `i18n`, `api`, `ui`). See [docs/architecture.md](docs/architecture.md).
 
 ## Documentation & Contributing
 
