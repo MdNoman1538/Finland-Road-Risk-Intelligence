@@ -6,7 +6,7 @@ from typing import Literal
 import duckdb
 from pydantic import BaseModel, Field
 
-from src.db import DB_PATH, connect_spatial
+from src.core.db import DB_PATH, connect_spatial
 from src.i18n import (
     translate_accident_type,
     translate_lighting,

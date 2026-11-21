@@ -9,7 +9,7 @@ from pathlib import Path
 
 import duckdb
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # src/core/db.py -> repository root
 DB_PATH = PROJECT_ROOT / "data" / "processed" / "road_risk.duckdb"
 
 

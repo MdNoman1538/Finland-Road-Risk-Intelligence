@@ -9,7 +9,7 @@ import shutil
 
 import pytest
 
-from src.db import DB_PATH
+from src.core.db import DB_PATH
 from src.scoring import RiskQuery, SpatialRiskEngine
 
 OULU = RiskQuery(lat=65.0121, lon=25.4651, radius_m=250)
