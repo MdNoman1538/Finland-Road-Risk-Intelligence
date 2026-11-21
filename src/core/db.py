@@ -9,8 +9,9 @@ from pathlib import Path
 
 import duckdb
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]  # src/core/db.py -> repository root
-DB_PATH = PROJECT_ROOT / "data" / "processed" / "road_risk.duckdb"
+from src.core.paths import DB_PATH, PROJECT_ROOT
+
+__all__ = ["DB_PATH", "PROJECT_ROOT", "connect_spatial"]
 
 
 def connect_spatial(

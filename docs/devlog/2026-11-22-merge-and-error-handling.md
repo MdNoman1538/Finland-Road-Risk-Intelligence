@@ -83,3 +83,23 @@ After the change, the files were byte-for-byte identical. The characterization t
 The future-crash bug existed before this branch (`max(0, age)` quietly turned negative ages into "brand new"). Making `reference_year` easier to see made it worth fixing now.
 
 **Lesson:** the reviewer saw *consequences across time* (data refreshes, a future 2026 load), which the snapshot test can't, because it only compares today's data.
+
+## Known issue #8: the database moves out of git ([ADR-0007](../decisions/0007-database-as-versioned-release-asset.md))
+
+The owner chose option A, a GitHub Release asset. What was built:
+- **`data/road_risk.lock.json`** pins tag, URL, SHA-256 and size. It's the data equivalent of `uv.lock`: the code names the exact bytes it expects.
+- **`src/core/dataset.py`** (standard library only, so it runs before anything else is installed):
+  - `fetch` downloads to a `.part` file, verifies the checksum, then renames it into place. A crash or a bad download can therefore never leave a half-written DB where the app would open it.
+  - It skips the download if the local file already matches.
+  - It **refuses to overwrite a different local DB**, such as a fresh re-ingest, unless given `--force`.
+  - `lock <tag>` pins a rebuilt DB and prints the `gh release create` command.
+- **`src/core/paths.py`:** the project paths now live in one file, because both `db.py` and the downloader need them.
+- **Render** runs `python -m src.core.dataset` after `pip install`. **CI** caches the DB under `hashFiles(lock file)`, so a new data version invalidates the cache automatically.
+- **Tests** use `file://` URLs, so they run without network.
+  - Unit tests: download, corrupted download, already up to date, and refusing to overwrite.
+  - Integration test: the local DB matches the lock. If someone rebuilds the DB and forgets to publish it, this test says so.
+  - A test that git doesn't track `data/processed/`.
+
+**Why not rewrite history to remove the old 38 MB?** It would need a force-push to a public repository. Every existing clone would then diverge, and every fork would keep the file anyway. That's destructive, for a small gain.
+
+**Order matters when shipping this:** the Release must exist *before* the PR's CI runs, or the fetch step fails with 404.
