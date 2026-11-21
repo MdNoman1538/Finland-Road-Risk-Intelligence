@@ -1,6 +1,6 @@
 """Raw Väylävirasto crash CSVs -> data/processed/road_risk.duckdb, reproducibly.
 
-    uv run python src/ingestion/ingest_all.py [--raw-dir data/raw] [--output path]
+    uv run python -m src.ingestion.ingest_all [--raw-dir data/raw] [--output path]
 
 Same raw files in -> same table contents out (tests/test_ingestion_cleaning.py builds twice
 and compares). The cleaning rules live in src/ingestion/clean.py. Nothing is dropped
@@ -143,7 +143,7 @@ def detect_file_format(csv_path: Path) -> tuple[str, str, list[str]]:
                 if not first_line:
                     continue
                 delim = "\t" if first_line.count("\t") > first_line.count(";") else ";"
-                cols = [c.strip().lstrip("﻿") for c in first_line.split(delim)]
+                cols = [c.strip().lstrip("\ufeff") for c in first_line.split(delim)]
                 if len(cols) > 4:
                     return enc, delim, cols
         except UnicodeDecodeError:
@@ -209,7 +209,7 @@ def _ingest_accident_file(con: duckdb.DuckDBPyConnection, path: Path, raw_dir: P
         SELECT
             CAST({src["year"]} AS INTEGER) AS year,
             TRIM(CAST({src["accident_id"]} AS VARCHAR)) AS accident_id,
-            TRY_CAST({src["month"]} AS INTEGER) AS month,
+            {clean.month(src["month"])} AS month,
             {clean.text(src["severity"])} AS severity,
             {clean.speed_limit(src["speed_limit"])} AS speed_limit,
             {clean.text(src["surface_condition"])} AS surface_condition,
@@ -220,9 +220,11 @@ def _ingest_accident_file(con: duckdb.DuckDBPyConnection, path: Path, raw_dir: P
             {clean.text(src["region"])} AS region,
             {clean.text(src["municipality"])} AS municipality,
             {clean.heavy_vehicle(src["heavy_vehicle"])} AS heavy_vehicle,
+            NULLIF(TRIM({src["x"]}), '') AS x_raw,
+            NULLIF(TRIM({src["y"]}), '') AS y_raw,
             TRY_CAST({src["x"]} AS DOUBLE) AS x,
             TRY_CAST({src["y"]} AS DOUBLE) AS y
-        FROM read_csv('{csv}', header=true, delim='{delim}', encoding='{duck_enc}', auto_detect=true, ignore_errors=false)
+        FROM read_csv('{csv}', header=true, delim='{delim}', encoding='{duck_enc}', auto_detect=true, all_varchar=true, ignore_errors=false)
     """)
     wrong_year = con.execute("SELECT COUNT(*) FROM stage WHERE year IS DISTINCT FROM ?", [year]).fetchone()[0]
     if wrong_year:  # participants get their year from the file name, so the two must agree
@@ -237,9 +239,11 @@ def _ingest_accident_file(con: duckdb.DuckDBPyConnection, path: Path, raw_dir: P
                ST_X(ST_Transform(ST_Point(x, y), 'EPSG:3067', 'EPSG:4326', always_xy := true)) AS lon
         FROM stage WHERE x IS NOT NULL AND y IS NOT NULL
     """)
+    # Missing coordinates and unreadable ones are different problems: report them apart.
     con.execute(
         """INSERT INTO ingest_rejects
-           SELECT 'road_accidents', year, accident_id, NULL, ?, 'no_coordinates'
+           SELECT 'road_accidents', year, accident_id, NULL, ?,
+                  CASE WHEN x_raw IS NULL OR y_raw IS NULL THEN 'no_coordinates' ELSE 'bad_coordinates' END
            FROM stage WHERE x IS NULL OR y IS NULL""",
         [rel],
     )
@@ -254,7 +258,7 @@ def _ingest_participant_file(con: duckdb.DuckDBPyConnection, path: Path, raw_dir
     # pandas reads UTF-16 (the 2025 file) reliably. Everything stays a raw string here;
     # the cleaning is done by the same SQL rules as for accidents.
     df = pd.read_csv(path, sep=delim, encoding=enc, dtype=str, keep_default_na=False)
-    df.columns = [c.strip().lstrip("﻿") for c in df.columns]
+    df.columns = [c.strip().lstrip("\ufeff") for c in df.columns]
     src = PARTICIPANT_SOURCES["legacy" if "Onnett_id" in df.columns else "modern"]
     year = _file_year(path)
     rel = path.relative_to(raw_dir).as_posix()
@@ -334,6 +338,9 @@ def build_database(raw_dir: Path = RAW_DATA_DIR, db_path: Path = DB_PATH, *, qui
             summary = _summary(con)
         finally:
             con.close()
+        # A WAL next to the old file belongs to the old file; replayed onto the new one it
+        # could corrupt it. The new build was closed cleanly, so it has no WAL of its own.
+        db_path.with_name(db_path.name + ".wal").unlink(missing_ok=True)
         os.replace(building, db_path)  # atomic: the old database stays until the new one is complete
     finally:
         for leftover in (building, building.with_name(building.name + ".wal")):

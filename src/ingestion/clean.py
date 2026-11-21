@@ -74,4 +74,14 @@ def non_negative_int(col: str) -> str:
     return f"CASE WHEN {value} >= 0 THEN {value} END"
 
 
+def month(col: str) -> str:
+    """1-12, NULL if empty. Anything else stops the build: a bad month means a format change."""
+    value = f"TRY_CAST({col} AS INTEGER)"
+    return (
+        f"CASE WHEN NULLIF(TRIM(CAST({col} AS VARCHAR)), '') IS NULL THEN NULL "
+        f"WHEN {value} BETWEEN 1 AND 12 THEN {value} "
+        f"ELSE error('impossible month value: ' || CAST({col} AS VARCHAR)) END"
+    )
+
+
 speed_limit = positive_int

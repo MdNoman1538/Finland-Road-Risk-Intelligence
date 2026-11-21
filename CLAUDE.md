@@ -71,7 +71,7 @@ uv run pytest                                            # tests (must pass befo
 uv run pre-commit run --all-files                        # all hooks
 uv run uvicorn src.api.main:app --reload                 # API on :8000
 PYTHONPATH=. uv run streamlit run src/ui/app.py          # dashboard on :8501
-uv run python src/ingestion/ingest_all.py                # rebuild DB (needs data/raw/)
+uv run python -m src.ingestion.ingest_all               # rebuild DB from data/raw/ (reproducible)
 uv run python -m src.core.dataset                        # fetch the pinned DB release (checksum-verified)
 uv run python -m src.core.dataset lock data-YYYY-MM-DD   # after a rebuild: pin it, then gh release create + commit the lock
 ```

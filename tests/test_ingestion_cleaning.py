@@ -232,3 +232,49 @@ def test_road_user_filter_does_not_match_a_crash_from_another_year(built):
         assert engine.evaluate_point(RiskQuery(lat=lat22, lon=lon22, **cyclist)).total_accidents == 0
     finally:
         engine.close()
+
+
+def test_garbled_coordinates_are_rejected_with_their_own_reason(tmp_path):
+    """TRY_CAST would turn '640000,5' into NULL and file it as 'no coordinates'. A value
+    that is present but unreadable is a different problem and must say so."""
+    bad = LEGACY_ACC.replace(";on;640000;6945000", ";on;640000,5;6945000")
+    db = tmp_path / "db.duckdb"
+    build_database(_write_raw(tmp_path / "raw", legacy_acc=bad), db, quiet=True)
+    with connect_spatial(db) as con:
+        reasons = dict(
+            con.execute(
+                "SELECT accident_id, reason FROM ingest_rejects WHERE table_name = 'road_accidents'"
+            ).fetchall()
+        )
+    assert reasons == {"9710903": "bad_coordinates", "101": "no_coordinates"}
+
+
+def test_an_impossible_month_stops_the_build(tmp_path):
+    bad = LEGACY_ACC.replace("9710903;2019;10;", "9710903;2019;13;")
+    with pytest.raises(duckdb.Error, match="month"):
+        build_database(_write_raw(tmp_path / "raw", legacy_acc=bad), tmp_path / "db.duckdb", quiet=True)
+
+
+def test_ids_with_leading_zeros_still_join(tmp_path):
+    """Accident IDs must be read as text, like participant IDs, or '0123' becomes 123."""
+    acc = LEGACY_ACC.replace("\n100;2019;", "\n0100;2019;")
+    db = tmp_path / "db.duckdb"
+    raw = _write_raw(tmp_path / "raw", legacy_acc=acc)
+    part = raw / "tieliikenneonnettomuudet_2019/tieliikenneonnettomuudet_2019_osallinen.csv"
+    part.write_text(LEGACY_PART.replace("\n100;5;", "\n0100;5;"), encoding="utf-8")
+    build_database(raw, db, quiet=True)
+    with connect_spatial(db) as con:
+        assert (
+            con.execute("SELECT COUNT(*) FROM accident_participants WHERE accident_id = '0100'").fetchone()[0]
+            == 1
+        )
+
+
+def test_a_stale_wal_next_to_the_old_database_is_removed(built, tmp_path):
+    """A write-ahead log left by a crashed writer belongs to the OLD file; replaying it onto
+    the new one could corrupt it."""
+    db = tmp_path / "road_risk.duckdb"
+    stale = tmp_path / "road_risk.duckdb.wal"
+    stale.write_bytes(b"log of a different database")
+    build_database(_write_raw(tmp_path / "raw"), db, quiet=True)
+    assert not stale.exists()

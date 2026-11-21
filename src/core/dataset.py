@@ -65,6 +65,11 @@ def fetch(lock_path: Path = LOCK_PATH, target: Path = DB_PATH, *, force: bool = 
             for chunk in iter(lambda: response.read(1 << 20), b""):
                 digest.update(chunk)
                 out.write(chunk)
+        received = part.stat().st_size
+        if received != lock["bytes"]:  # say what happened: a cut-off transfer is not tampering
+            raise ChecksumError(
+                f"incomplete download of {lock['url']}: {received:,} of {lock['bytes']:,} bytes"
+            )
         if digest.hexdigest() != lock["sha256"]:
             raise ChecksumError(f"SHA-256 mismatch for {lock['url']}: got {digest.hexdigest()}")
         os.replace(part, target)  # atomic on the same filesystem

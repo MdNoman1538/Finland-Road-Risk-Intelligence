@@ -118,3 +118,9 @@ def test_incidents_are_the_highest_weighted_and_labelled_as_such(engine):
     assert len(scores) == 15
     assert scores == sorted(scores, reverse=True)
     assert not hasattr(profile, "nearest_incidents")
+
+
+def test_road_user_filter_ignores_extra_whitespace(engine):
+    clean = engine.evaluate_point(OULU_250.model_copy(update={"road_user_filter": "henkilöauto"}))
+    messy = engine.evaluate_point(OULU_250.model_copy(update={"road_user_filter": "  Henkilöauto  "}))
+    assert clean.total_accidents == messy.total_accidents > 0

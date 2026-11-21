@@ -168,7 +168,7 @@ class SpatialRiskEngine:
                 INNER JOIN (
                     SELECT DISTINCT year, accident_id
                     FROM accident_participants
-                    WHERE vehicle_type = LOWER({param(query.road_user_filter.strip())})
+                    WHERE vehicle_type = {param(" ".join(query.road_user_filter.split()).lower())}
                 ) p ON r.year = p.year AND r.accident_id = p.accident_id  -- IDs repeat across years
             """
 

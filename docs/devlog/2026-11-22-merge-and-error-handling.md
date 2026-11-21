@@ -142,3 +142,15 @@ The owner's rule: *don't clean the data yourself; write code and run it, so the 
 - **Tests:** 111 pass. The synthetic-CSV tests cover every rule in both file formats, the rejects, the logging, a reproducible double build, the failed-build case, and the cross-year filter bug.
 
 The new database is pinned as `data-2026-11-22` and has to be uploaded as a release before CI on this PR can fetch it.
+
+### What the code review caught (data hygiene)
+
+`/code-review medium` reported 9 findings. One was the not-yet-uploaded release, which is an owner step. The other 8 were fixed, test-first where they were behaviour:
+
+- **The documented rebuild command crashed** (`ModuleNotFoundError: src`): it ran the file as a script, so `src` wasn't importable. It's now `python -m src.ingestion.ingest_all`. My own runs had used `PYTHONPATH=.`, which hid the problem: a reminder to test the *documented* command, not your own variant.
+- **Accident IDs were parsed by DuckDB's type detection, participant IDs as text by pandas.** A leading zero would stop them joining. Every accident column is now read as text (`all_varchar`). Today's data happened to be unaffected, but by luck.
+- **`TRY_CAST` turned a garbled coordinate into "no coordinates",** and a bad month into NULL. That broke the "nothing silently" promise. Now `bad_coordinates` is its own reject reason, and an impossible month stops the build.
+- **A stale `road_risk.duckdb.wal`** from a crashed writer could be replayed onto the new file. It's removed before the swap.
+- **Smaller fixes:** a truncated download now says "incomplete" instead of "checksum mismatch"; road-user filters normalise inner whitespace; visible `﻿` escapes replace invisible BOM characters; and ADR-0008 records the key and missing-value decision.
+
+**Verification:** rebuilt from the real raw files with the documented command; the content fingerprints are identical to the first clean build. So the fixes changed nothing in today's data and only guard against future files. 117 tests pass.
