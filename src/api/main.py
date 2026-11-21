@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src.scoring import RiskProfile, RiskQuery, SpatialRiskEngine
@@ -29,7 +30,21 @@ class RouteCorridorResponse(BaseModel):
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "database": str(engine.db_path)}
+    """Readiness check that exercises the real dependencies: the database file AND the
+    spatial extension. Render uses this path to decide whether a deploy is healthy, so a
+    check that skips them reports "ok" while every risk endpoint fails (known issue #1).
+    """
+    try:
+        con = engine.cursor()
+        try:
+            accidents = con.execute("SELECT COUNT(*) FROM road_accidents").fetchone()[0]
+            con.execute("SELECT ST_Point(0, 0)").fetchone()
+        finally:
+            con.close()
+    except Exception as exc:
+        # Report the failure type only; never leak paths or internals to the client.
+        return JSONResponse(status_code=503, content={"status": "unavailable", "error": type(exc).__name__})
+    return {"status": "ok", "accidents": accidents}
 
 
 @app.post("/api/v1/risk/point", response_model=RiskProfile)

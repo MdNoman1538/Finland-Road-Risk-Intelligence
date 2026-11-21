@@ -1,16 +1,35 @@
-"""API contract tests that do not touch the database."""
+"""API contract tests."""
 
+import pytest
 from fastapi.testclient import TestClient
 
-from src.api.main import app
+import src.api.main as api
+from src.scoring import SpatialRiskEngine
 
-client = TestClient(app)
+client = TestClient(api.app)
 
 
-def test_health_returns_ok():
+@pytest.mark.integration
+def test_health_reports_ok_when_database_and_spatial_extension_work():
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    assert response.json() == {"status": "ok", "accidents": 180_734}
+
+
+def test_health_reports_503_when_database_is_unusable(monkeypatch, tmp_path):
+    monkeypatch.setattr(api, "engine", SpatialRiskEngine(db_path=tmp_path / "missing.duckdb"))
+    response = client.get("/health")
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "unavailable"
+    assert str(tmp_path) not in response.text  # never leak filesystem paths
+
+
+@pytest.mark.integration
+def test_point_risk_returns_profile():
+    response = client.get("/api/v1/risk/point", params={"lat": 65.0121, "lon": 25.4651})
+    assert response.status_code == 200
+    assert response.json()["total_accidents"] == 95
 
 
 def test_point_risk_rejects_out_of_range_latitude():
