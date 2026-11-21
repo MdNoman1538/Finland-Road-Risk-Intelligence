@@ -9,3 +9,6 @@ models/*.joblib
 .venv/
 .pytest_cache/
 .ruff_cache/
+
+# The crash database is a release asset pinned by data/road_risk.lock.json (src/core/dataset.py)
+data/processed/

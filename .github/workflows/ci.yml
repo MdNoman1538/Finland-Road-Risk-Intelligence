@@ -52,5 +52,16 @@ jobs:
       - name: Install dependencies (exactly as locked)
         run: uv sync --frozen
 
+      # The crash DB is a release asset pinned by data/road_risk.lock.json (known issue #8).
+      # Cached by the lock file's hash: a new data version invalidates the cache by itself.
+      - name: Cache the crash database
+        uses: actions/cache@v6.1.0
+        with:
+          path: data/processed/road_risk.duckdb
+          key: crash-db-${{ hashFiles('data/road_risk.lock.json') }}
+
+      - name: Fetch the pinned crash database (checksum-verified)
+        run: uv run --frozen python -m src.core.dataset
+
       - name: Run tests
         run: uv run --frozen pytest

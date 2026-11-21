@@ -4,7 +4,8 @@ services:
     name: finland-road-risk-dashboard
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    # The DB is not in git: fetch the release asset pinned by data/road_risk.lock.json
+    buildCommand: pip install -r requirements.txt && python -m src.core.dataset
     startCommand: PYTHONPATH=. streamlit run src/ui/app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
     envVars:
       - key: PYTHON_VERSION
@@ -15,7 +16,8 @@ services:
     name: finland-road-risk-api
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    # The DB is not in git: fetch the release asset pinned by data/road_risk.lock.json
+    buildCommand: pip install -r requirements.txt && python -m src.core.dataset
     startCommand: uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
