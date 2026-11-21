@@ -27,6 +27,7 @@ The owner is learning AI engineering through this project. **Explain the why, wh
 - **Measure, don't guess:** any performance or data claim must come from a measurement you ran; record how.
 - Ask the owner before pushing, opening or merging PRs, changing GitHub settings, or any other outward-facing action.
 - Never commit secrets, `.env` files, raw data (`data/raw/` is git-ignored) or personal data.
+- **Every commit message has a `Changes:` section** (one line per changed symbol, `- path::Qualified.name: what and why`, or `- path: …` for whole files; `Refs #N` when an issue exists). projectViewer shows these notes on the changed code.
 
 ## Documentation duty (every session)
 
@@ -36,9 +37,13 @@ The owner is learning AI engineering through this project. **Explain the why, wh
 
 ## Codebase map
 
+Module rules (one job per module, one-way dependencies, no empty placeholders): [ADR-0006](docs/decisions/0006-module-architecture.md). Target modules per phase: [docs/architecture.md](docs/architecture.md).
+
 | Path | Purpose |
 |---|---|
-| `src/spatial/ingest_all.py` | Raw Väylävirasto CSVs → `data/processed/road_risk.duckdb` (two schema eras: 2014–21 and 2022+) |
+| `src/core/db.py` | The only place DuckDB connections are opened (installs + loads the spatial extension) |
+| `src/ingestion/ingest_all.py` | Raw Väylävirasto CSVs → `data/processed/road_risk.duckdb` (two schema eras: 2014–21 and 2022+) |
+| `scripts/exploration/` | One-off data inspection scripts (not part of the app) |
 | `src/scoring/risk_engine.py` | `SpatialRiskEngine`: radius-based risk scoring (to be replaced in Phases 1–2) |
 | `src/api/main.py` | FastAPI service |
 | `src/ui/app.py` | Streamlit + Folium dashboard (dev/demo tool, not the in-car interface) |
@@ -62,7 +67,7 @@ uv run pytest                                            # tests (must pass befo
 uv run pre-commit run --all-files                        # all hooks
 uv run uvicorn src.api.main:app --reload                 # API on :8000
 PYTHONPATH=. uv run streamlit run src/ui/app.py          # dashboard on :8501
-uv run python src/spatial/ingest_all.py                  # rebuild DB (needs data/raw/)
+uv run python src/ingestion/ingest_all.py                # rebuild DB (needs data/raw/)
 ```
 
 If a conda env is active, `uv` prints a `VIRTUAL_ENV ... does not match` warning; it's harmless (uv uses `.venv`). Run `conda deactivate` or `export VIRTUAL_ENV=` to silence it.

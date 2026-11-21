@@ -1,6 +1,6 @@
 # Project Status
 
-**As of:** 2026-11-21 · **Current phase:** [Phase 0](roadmap.md#phase-0--engineering-foundations), in progress. Three PRs prepared locally (not yet pushed): workflow/docs, tooling/CI, spatial-extension fix. 46 tests passing.
+**As of:** 2026-11-21 · Module structure: see [architecture.md](architecture.md). · **Current phase:** [Phase 0](roadmap.md#phase-0--engineering-foundations), in progress. Three PRs prepared locally (not yet pushed): workflow/docs, tooling/CI, spatial-extension fix. 46 tests passing.
 
 ## Summary
 
@@ -16,12 +16,12 @@ The goal is an **in-car, real-time, context-aware alert system**. Measured again
 
 | Component | File | What it does | Verdict vs goal | Changes in |
 |---|---|---|---|---|
-| Data ingestion | [src/spatial/ingest_all.py](../src/spatial/ingest_all.py) | Merges the 2014–21 and 2022+ file formats, handles 3 text encodings, converts coordinates EPSG:3067 → WGS84, builds the R-tree spatial index. | **Keep.** Solid base. Needs more columns and data checks. | Phase 1 |
+| Data ingestion | [src/ingestion/ingest_all.py](../src/ingestion/ingest_all.py) | Merges the 2014–21 and 2022+ file formats, handles 3 text encodings, converts coordinates EPSG:3067 → WGS84, builds the R-tree spatial index. | **Keep.** Solid base. Needs more columns and data checks. | Phase 1 |
 | Risk engine | [src/scoring/risk_engine.py](../src/scoring/risk_engine.py) | Crashes within a radius, weighted by severity (10/5/3/1) × 5-year half-life decay × distance. Adjusted for search area and squashed to 0–100. | **Replace the method, keep the interface idea.** Counts are not risk (no traffic exposure), circles are not roads, and there is no "right now" conditioning. | Phases 1, 2, 4 |
 | REST API | [src/api/main.py](../src/api/main.py) | `/health`, point risk (GET/POST), route risk. | **Keep FastAPI.** Endpoints will change as the engine changes. | Phases 0, 3 |
 | Dashboard | [src/ui/app.py](../src/ui/app.py) | Region and municipality dropdowns, top-10 hotspots on a 250 m grid, click-to-evaluate map, winter and road-user filters. | **Keep as a dev / analysis / demo tool.** It is not the in-car interface. | Phases 2, 5 (drive-replay simulator) |
 | Translations | [src/i18n/translator.py](../src/i18n/translator.py) | Finnish → English labels for severity, surface, lighting, vehicle and ~75 crash types. | **Keep.** Later also feeds the LLM's Finnish/English output. | — |
-| Helper scripts | `src/spatial/check_*.py`, `inspect_raw_data.py`, `test_spatial_query.py` | One-off exploration scripts. | Turn into real tests or delete. `init_db.py` is empty. | Phase 0 |
+| Helper scripts | `scripts/exploration/` | One-off exploration scripts, moved out of `src/` ([ADR-0006](decisions/0006-module-architecture.md)); empty `init_db.py` deleted. | Keep as scripts; turn the useful checks into data-quality tests in Phase 1. | Phase 1 |
 | Deployment | [render.yaml](../render.yaml) | Two free Render services (dashboard + API). | Fine for a portfolio demo. Not the product deployment. | Phase 0 |
 
 ## 2. Data inventory (verified)
