@@ -73,3 +73,18 @@ def test_internal_error_details_go_to_the_server_log(monkeypatch, tmp_path, capl
     record = next(r for r in caplog.records if error_id in r.getMessage())
     assert record.exc_info is not None
     assert "secret-dir" in str(record.exc_info[1])  # the operator still sees the real cause
+
+
+@pytest.mark.integration
+def test_get_point_risk_supports_finnish_labels():
+    """Known issue #6: the GET endpoint ignored lang, so it always answered in English."""
+    response = client.get("/api/v1/risk/point", params={"lat": 65.0121, "lon": 25.4651, "lang": "fi"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["lang"] == "fi"
+    assert "Ei henkilövahinkoja" in body["severity_breakdown"]
+
+
+def test_get_point_risk_rejects_unknown_language():
+    response = client.get("/api/v1/risk/point", params={"lat": 65.0, "lon": 25.0, "lang": "sv"})
+    assert response.status_code == 422

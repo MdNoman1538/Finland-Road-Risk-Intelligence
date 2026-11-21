@@ -1,5 +1,6 @@
 import logging
 import uuid
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -76,6 +77,7 @@ def evaluate_point_risk_get(
     radius_m: float = Query(250.0, gt=0.0, le=10000.0),
     winter_only: bool = Query(False),
     road_user_filter: str | None = Query(None),
+    lang: Literal["en", "fi"] = Query("en"),
 ):
     query = RiskQuery(
         lat=lat,
@@ -83,6 +85,7 @@ def evaluate_point_risk_get(
         radius_m=radius_m,
         winter_only=winter_only,
         road_user_filter=road_user_filter,
+        lang=lang,
     )
     return engine.evaluate_point(query)
 
@@ -113,6 +116,6 @@ def evaluate_route_corridor(req: RouteCorridorRequest):
         waypoint_count=len(profiles),
         max_risk_score=max_score,
         mean_risk_score=mean_score,
-        overall_tier=engine._classify_tier(max_score),
+        overall_tier=engine.classify_tier(max_score),
         segments=profiles,
     )

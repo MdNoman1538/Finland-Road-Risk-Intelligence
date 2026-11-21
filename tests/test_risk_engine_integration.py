@@ -55,3 +55,22 @@ def test_concurrent_calls_from_many_threads_give_identical_results(engine):
 def test_close_then_reuse_reconnects(engine):
     engine.close()
     assert engine.evaluate_point(OULU_250).total_accidents == 95
+
+
+def test_latest_data_year_comes_from_the_data(engine):
+    assert engine.latest_data_year() == 2025
+
+
+def test_default_reference_year_matches_explicit_latest_year(engine):
+    implicit = engine.evaluate_point(OULU_250)
+    explicit = engine.evaluate_point(OULU_250.model_copy(update={"reference_year": 2025}))
+    assert implicit == explicit
+
+
+def test_incidents_are_the_highest_weighted_and_labelled_as_such(engine):
+    """Known issue #5: the field was called nearest_incidents but held the top 15 by weight."""
+    profile = engine.evaluate_point(HELSINKI_2000)
+    scores = [i.weighted_score for i in profile.highest_weighted_incidents]
+    assert len(scores) == 15
+    assert scores == sorted(scores, reverse=True)
+    assert not hasattr(profile, "nearest_incidents")

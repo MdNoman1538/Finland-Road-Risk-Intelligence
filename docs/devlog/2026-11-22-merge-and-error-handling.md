@@ -35,3 +35,32 @@ Deliberate choices:
 ## Also verified
 
 The projectViewer Claude Code hook now works in real use: edits made in this session appeared live in the viewer's activity feed.
+
+## Known issues #4, #5, #6, #11: engine and API cleanups
+
+**Safety net first.** Before touching the scoring loop, the *complete* output of 5 queries was saved to JSON with key order kept:
+- Oulu 250 m and Helsinki 2 km
+- winter + Finnish
+- cyclist filter in Tampere
+- an empty area
+
+After the change, the files were byte-for-byte identical. The characterization tests only pin the score and count. The snapshot also catches changes in labels, counts, tie order and dict order, which matters because the counting code was rewritten.
+
+**Fixes (each test-first):**
+- **#4, reference year.** The default is now `None`, meaning "the newest year in the data". A hard-coded `2025` would have frozen time decay when 2026 data arrives, quietly over-weighting old crashes. The value is read once per engine, because the DB is read-only while the app runs.
+- **#5, naming.** `nearest_incidents` became `highest_weighted_incidents`. The old name was wrong: the list is sorted by severity × recency × proximity, not by distance. This renames an API field. The dashboard is the only known consumer, so I renamed it rather than keeping a deprecated alias. With outside users, the industry practice would be to keep both for a release and announce the change.
+- **#6.** GET point accepts `lang`, typed as `Literal["en","fi"]` so FastAPI rejects other values with 422. `classify_tier` is now public, because a second module uses it. Calling `_private` methods from outside a class couples you to internals that may change.
+- **#11, speed.** Only the 15 returned incidents are turned into objects with translations, using `heapq.nlargest`. Its documentation guarantees the same result as `sorted(..., reverse=True)[:15]`, including ties. Counting happens on the Finnish values; each distinct value is translated once, and counts are summed when two spellings share a label.
+
+**Surprise: the #11 diagnosis was wrong.** The status file said the slowness was "in Python, not SQL". That came from reading the code, not from a profile. Measurements (median of 15 runs, Helsinki 2 km, 4,659 rows):
+
+| What | Time |
+|---|---|
+| `evaluate_point` before | 135 ms |
+| `evaluate_point` after | 124 ms |
+| the SQL alone | 107 ms |
+| SQL with the point passed as fixed bounds (experiment, not applied) | 95 ms |
+
+`EXPLAIN` shows the R-tree index is used, so this isn't a missing index. Returning 4,659 rows and computing their distances simply costs that much. I didn't optimize further: Phases 1–2 replace radius queries with precomputed tiles (ADR-0003), where a lookup is a memory access.
+
+**Lesson:** a performance claim without a profile is a guess. CLAUDE.md already says "measure, don't guess"; this time the guess had slipped in while the status file was being written.
